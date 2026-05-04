@@ -15,6 +15,7 @@ def _system_to_text(system) -> str:
 def _user_blocks(content: list) -> tuple[object, list]:
     parts: list = []
     tool_results: list = []
+    extra_images: list = []
     for block in content:
         t = block.get("type")
         if t == "text":
@@ -30,8 +31,23 @@ def _user_blocks(content: list) -> tuple[object, list]:
             parts.append({"type": "image_url", "image_url": {"url": url}})
         elif t == "tool_result":
             tr = block.get("content")
+            tr_text = ""
             if isinstance(tr, list):
-                tr_text = "".join(b.get("text", "") for b in tr if b.get("type") == "text")
+                chunks: list = []
+                for b in tr:
+                    bt = b.get("type")
+                    if bt == "text":
+                        chunks.append(b.get("text", ""))
+                    elif bt == "image":
+                        src = b.get("source", {})
+                        if src.get("type") == "base64":
+                            url = f"data:{src.get('media_type', 'image/png')};base64,{src.get('data', '')}"
+                        elif src.get("type") == "url":
+                            url = src.get("url", "")
+                        else:
+                            continue
+                        extra_images.append({"type": "image_url", "image_url": {"url": url}})
+                tr_text = "".join(chunks)
             elif isinstance(tr, str):
                 tr_text = tr
             elif tr is None:
@@ -43,6 +59,7 @@ def _user_blocks(content: list) -> tuple[object, list]:
                 "tool_call_id": block.get("tool_use_id"),
                 "content": tr_text,
             })
+    parts = extra_images + parts
     if parts and all(p.get("type") == "text" for p in parts):
         return "".join(p["text"] for p in parts), tool_results
     return parts, tool_results
