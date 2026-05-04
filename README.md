@@ -15,15 +15,14 @@ Claude Code  ──►  claude-code-gpt  ──►  Azure / OpenAI / Codex
 
 ## Why
 
-Same Claude Code workflow, dramatically lower cost:
+Same Claude Code workflow, with the option to point at cheaper backends. From a single internal run on the same task (a small Pygame demo, sub‑agent enabled, sonnet tier × sonnet tier):
 
-| Setup (sonnet × sonnet sub‑agent run, identical task) | Cost |
+| Backend | Approx. spend on that one run |
 | --- | ---: |
-| Anthropic Opus direct (estimate) | ~$15+ |
 | Azure GPT‑5.5 via this proxy | ~$4 |
 | Azure GPT‑5.4‑mini via this proxy | **~$0.43** |
 
-Real measurements from our own runs. Your mileage will vary, but the order of magnitude holds.
+Anthropic Opus on the same task would have been several times more expensive. We're not publishing apples‑to‑apples benchmarks — your mileage will vary heavily by task, prompt size, and sub‑agent fan‑out. Treat this as a rough proof that the proxy actually works, not a marketing claim.
 
 ---
 
@@ -33,10 +32,14 @@ Real measurements from our own runs. Your mileage will vary, but the order of ma
 git clone https://github.com/gh777111/claude-code-gpt
 cd claude-code-gpt
 cp .env.example .env
-# edit .env with your provider + credentials
+# Edit .env: pick a provider and fill in credentials.
+# For Azure, the deployment names you set must already exist in your Azure resource.
 
-uv sync                       # installs fastapi/uvicorn/httpx
+uv sync                       # installs fastapi/uvicorn/httpx/python-dotenv
+
+mkdir -p ~/.local/bin
 ln -sf "$PWD/claudegpt" ~/.local/bin/claudegpt
+# make sure ~/.local/bin is on your PATH
 
 claudegpt                     # boots the proxy + launches Claude Code
 ```
@@ -45,8 +48,9 @@ Requirements:
 
 - macOS / Linux
 - Python 3.12+
-- [`uv`](https://docs.astral.sh/uv/) (or any PEP 517 installer — `pip install -e .` works too)
+- [`uv`](https://docs.astral.sh/uv/) (`pip install -e .` also works)
 - [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) installed
+- Credentials for at least one supported backend (see below)
 
 ---
 

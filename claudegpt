@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# claudegpt — launch Claude Code with Azure OpenAI as backend
+# claudegpt — launch Claude Code against a non-Anthropic backend
+# (provider chosen via CLAUDEGPT_PROVIDER: azure | openai | codex)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -12,10 +13,9 @@ UV_BIN="${UV_BIN:-}"
 if [[ -z "$UV_BIN" ]]; then
   if command -v uv >/dev/null 2>&1; then
     UV_BIN="$(command -v uv)"
-  elif [[ -x "$HOME/.langflow/uv/uv" ]]; then
-    UV_BIN="$HOME/.langflow/uv/uv"
   else
-    echo "[claudegpt] uv not found in PATH; set UV_BIN or install uv" >&2
+    echo "[claudegpt] uv not found in PATH. Install: https://docs.astral.sh/uv/" >&2
+    echo "                or set UV_BIN to the uv binary." >&2
     exit 1
   fi
 fi
@@ -64,7 +64,7 @@ else
 fi
 
 export ANTHROPIC_BASE_URL="http://${HOST}:${PORT}"
-export ANTHROPIC_AUTH_TOKEN="claudegpt-azure"
+export ANTHROPIC_AUTH_TOKEN="claudegpt"
 unset ANTHROPIC_API_KEY || true
 export ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-claude-opus-4-7}"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-claude-sonnet-4-6}"

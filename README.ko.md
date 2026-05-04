@@ -15,15 +15,14 @@ Claude Code  ──►  claude-code-gpt  ──►  Azure / OpenAI / Codex
 
 ## 왜?
 
-같은 Claude Code 워크플로우, 비용은 극적으로 절감:
+같은 Claude Code 워크플로우, 더 저렴한 백엔드를 선택할 수 있습니다. 동일 작업(작은 Pygame 데모, sub‑agent 사용, sonnet × sonnet)에서 한 번 측정한 값:
 
-| 셋업 (동일 작업 — 한글 타자게임, sonnet × sonnet sub‑agent) | 비용 |
+| 백엔드 | 1회 작업 비용 (참고치) |
 | --- | ---: |
-| Anthropic Opus 직접 (추정) | ~$15+ |
 | Azure GPT‑5.5 (이 프록시) | ~$4 |
 | Azure GPT‑5.4‑mini (이 프록시) | **~$0.43** |
 
-실제 측정값. 작업 종류에 따라 다르지만 자릿수는 비슷합니다.
+Anthropic Opus를 같은 작업에 직접 사용하면 수 배 더 비쌌을 것입니다. 정식 벤치마크가 아닌 1회 사내 측정치이며, 비용은 작업 종류·프롬프트 크기·sub‑agent 개수에 크게 좌우됩니다. 마케팅 수치가 아니라 "프록시가 실제로 동작한다"는 확인 정도로 봐주세요.
 
 ---
 
@@ -33,10 +32,14 @@ Claude Code  ──►  claude-code-gpt  ──►  Azure / OpenAI / Codex
 git clone https://github.com/gh777111/claude-code-gpt
 cd claude-code-gpt
 cp .env.example .env
-# .env에 본인 provider + 자격증명 입력
+# .env에 provider 선택 + 자격증명 입력
+# Azure는 .env의 deployment 이름이 본인 Azure 리소스에 미리 존재해야 합니다.
 
-uv sync                       # fastapi/uvicorn/httpx 설치
+uv sync                       # fastapi/uvicorn/httpx/python-dotenv 설치
+
+mkdir -p ~/.local/bin
 ln -sf "$PWD/claudegpt" ~/.local/bin/claudegpt
+# ~/.local/bin 이 PATH에 들어있어야 합니다.
 
 claudegpt                     # 프록시 자동 기동 + Claude Code 실행
 ```
@@ -45,8 +48,9 @@ claudegpt                     # 프록시 자동 기동 + Claude Code 실행
 
 - macOS / Linux
 - Python 3.12 이상
-- [`uv`](https://docs.astral.sh/uv/) (또는 `pip install -e .` 도 동작)
+- [`uv`](https://docs.astral.sh/uv/) (또는 `pip install -e .`)
 - [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) 설치
+- 지원 백엔드 중 최소 하나의 자격증명 (아래 참조)
 
 ---
 
