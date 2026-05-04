@@ -59,7 +59,8 @@ def _build_request(openai_body: dict) -> tuple[str, dict, dict]:
             "Content-Type": "application/json",
         }
         body = dict(openai_body)
-        body.pop("max_output_tokens", None)
+        for k in ("max_output_tokens", "temperature", "top_p"):
+            body.pop(k, None)
         body["store"] = False
         body["stream"] = True
         if not body.get("instructions"):
@@ -73,6 +74,58 @@ def _build_request(openai_body: dict) -> tuple[str, dict, dict]:
     )
     headers = {"api-key": config.AZURE_API_KEY, "Content-Type": "application/json"}
     return url, headers, openai_body
+
+
+async def _collect_stream_to_json(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict,
+    body: dict,
+    model: str,
+) -> JSONResponse:
+    """Stream from backend, aggregate into a Responses-shaped dict, then
+    apply responses_to_anthropic. Used when backend requires stream=true
+    but the client requested stream=false."""
+    try:
+        async with client.stream("POST", url, headers=headers, json=body) as r:
+            if r.status_code >= 400:
+                err = await r.aread()
+                log.warning("Backend collect error %s: %s", r.status_code, err[:500])
+                return JSONResponse(
+                    status_code=r.status_code,
+                    content={"type": "error",
+                             "error": {"type": "api_error",
+                                       "message": err.decode("utf-8", "replace")[:2000]}},
+                )
+            response_meta: dict = {}
+            items_by_idx: dict[int, dict] = {}
+            async for line in r.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].lstrip()
+                if data == "[DONE]":
+                    break
+                try:
+                    evt = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                et = evt.get("type") or ""
+                if et == "response.created":
+                    response_meta = evt.get("response") or {}
+                elif et == "response.output_item.done":
+                    items_by_idx[evt.get("output_index", 0)] = evt.get("item") or {}
+                elif et in ("response.completed", "response.incomplete"):
+                    r_obj = evt.get("response") or {}
+                    response_meta = {**response_meta, **r_obj}
+            response_meta["output"] = [
+                items_by_idx[k] for k in sorted(items_by_idx)
+            ]
+            return JSONResponse(content=responses_to_anthropic(response_meta, model))
+    except httpx.HTTPError as e:
+        return JSONResponse(
+            status_code=502,
+            content={"type": "error", "error": {"type": "api_error", "message": str(e)}},
+        )
 
 
 def _models_summary() -> dict:
@@ -148,19 +201,27 @@ async def messages(req: Request):
             deployment = config.TOOLS_DEPLOYMENT
             openai_body["model"] = deployment
 
+    client_wants_stream = bool(openai_body.get("stream"))
     url, headers, send_body = _build_request(openai_body)
-    is_stream = bool(send_body.get("stream"))
+    backend_stream = bool(send_body.get("stream"))
 
     log.info(
-        "→ %s → %s (provider=%s, stream=%s, items=%d, effort=%s)",
+        "→ %s → %s (provider=%s, client_stream=%s, backend_stream=%s, items=%d, effort=%s)",
         requested_model, deployment, config.PROVIDER,
-        is_stream, len(send_body.get("input", [])), effort,
+        client_wants_stream, backend_stream,
+        len(send_body.get("input", [])), effort,
     )
 
     client = _client
     assert client is not None
 
-    if not is_stream:
+    # Backend forces stream but client wants non-stream: collect SSE → JSON
+    if backend_stream and not client_wants_stream:
+        return await _collect_stream_to_json(
+            client, url, headers, send_body, requested_model
+        )
+
+    if not backend_stream:
         try:
             r = await client.post(url, headers=headers, json=send_body)
         except httpx.HTTPError as e:
