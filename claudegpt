@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# claudegpt — launch Claude Code with Azure OpenAI as backend
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+HOST="${CLAUDEGPT_HOST:-127.0.0.1}"
+PORT="${CLAUDEGPT_PORT:-3210}"
+PIDFILE="${TMPDIR:-/tmp}/claudegpt-${PORT}.pid"
+LOGFILE="${TMPDIR:-/tmp}/claudegpt-${PORT}.log"
+
+UV_BIN="${UV_BIN:-}"
+if [[ -z "$UV_BIN" ]]; then
+  if command -v uv >/dev/null 2>&1; then
+    UV_BIN="$(command -v uv)"
+  elif [[ -x "$HOME/.langflow/uv/uv" ]]; then
+    UV_BIN="$HOME/.langflow/uv/uv"
+  else
+    echo "[claudegpt] uv not found in PATH; set UV_BIN or install uv" >&2
+    exit 1
+  fi
+fi
+
+started_here=0
+cleanup() {
+  if [[ "$started_here" == "1" && -f "$PIDFILE" ]]; then
+    pid="$(cat "$PIDFILE" 2>/dev/null || true)"
+    if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+    fi
+    rm -f "$PIDFILE"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+if curl -fsS "http://${HOST}:${PORT}/healthz" >/dev/null 2>&1; then
+  :
+else
+  echo "[claudegpt] starting proxy on ${HOST}:${PORT}…" >&2
+  cd "$ROOT"
+  CLAUDEGPT_HOST="$HOST" CLAUDEGPT_PORT="$PORT" \
+    "$UV_BIN" run --quiet python server.py \
+    >"$LOGFILE" 2>&1 &
+  echo $! >"$PIDFILE"
+  started_here=1
+
+  for _ in $(seq 1 120); do
+    if curl -fsS "http://${HOST}:${PORT}/healthz" >/dev/null 2>&1; then
+      break
+    fi
+    pid="$(cat "$PIDFILE" 2>/dev/null || true)"
+    if [[ -z "${pid:-}" ]] || ! kill -0 "$pid" 2>/dev/null; then
+      echo "[claudegpt] proxy died; check log: $LOGFILE" >&2
+      tail -n 40 "$LOGFILE" >&2 || true
+      exit 1
+    fi
+    sleep 0.5
+  done
+
+  if ! curl -fsS "http://${HOST}:${PORT}/healthz" >/dev/null 2>&1; then
+    echo "[claudegpt] proxy did not become healthy in time; log: $LOGFILE" >&2
+    tail -n 40 "$LOGFILE" >&2 || true
+    exit 1
+  fi
+fi
+
+export ANTHROPIC_BASE_URL="http://${HOST}:${PORT}"
+export ANTHROPIC_AUTH_TOKEN="claudegpt-azure"
+export ANTHROPIC_API_KEY="claudegpt-azure"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-claude-opus-4-7}"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-claude-sonnet-4-6}"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-claude-haiku-4-5}"
+unset ANTHROPIC_MODEL || true
+
+exec claude "$@"
