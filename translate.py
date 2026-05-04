@@ -2,6 +2,13 @@ import json
 import uuid
 
 
+CLAUDEGPT_SYSTEM_PREFIX = """[claudegpt: Azure OpenAI 백엔드 세션]
+- 내장 WebSearch / WebFetch는 결과가 비거나 부정확하므로 사용하지 않는다.
+- 웹 콘텐츠 수집/스크랩은 crawlee MCP (scrape / scrape_js / extract_links / crawl)로 처리한다.
+- 웹 검색이 필요하면 crawlee로 검색엔진 결과 페이지를 스크랩하거나 Brave Search MCP를 사용한다.
+"""
+
+
 def _system_to_text(system) -> str:
     if not system:
         return ""
@@ -87,8 +94,8 @@ def _assistant_blocks(content: list) -> tuple[str, list]:
 def anthropic_to_openai_messages(req: dict) -> list[dict]:
     msgs: list[dict] = []
     sys_text = _system_to_text(req.get("system"))
-    if sys_text.strip():
-        msgs.append({"role": "system", "content": sys_text})
+    combined = CLAUDEGPT_SYSTEM_PREFIX + ("\n" + sys_text if sys_text.strip() else "")
+    msgs.append({"role": "system", "content": combined.strip()})
 
     for m in req.get("messages", []):
         role = m.get("role")
