@@ -32,21 +32,84 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan, title="claudegpt")
 
 
-def _azure_url() -> str:
-    return f"{config.AZURE_ENDPOINT}/openai/v1/responses?api-version={config.AZURE_RESPONSES_API_VERSION}"
+def _read_codex_auth() -> tuple[str, str]:
+    with open(config.CODEX_AUTH_PATH) as f:
+        d = json.load(f)
+    tokens = d.get("tokens") or {}
+    return tokens["access_token"], tokens["account_id"]
+
+
+def _build_request(openai_body: dict) -> tuple[str, dict, dict]:
+    """(url, headers, body) per PROVIDER."""
+    if config.PROVIDER == "openai":
+        url = f"{config.OPENAI_BASE_URL}/responses"
+        headers = {
+            "Authorization": f"Bearer {config.OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        return url, headers, openai_body
+
+    if config.PROVIDER == "codex":
+        token, account_id = _read_codex_auth()
+        url = config.CODEX_ENDPOINT
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "chatgpt-account-id": account_id,
+            "OpenAI-Beta": "responses=experimental",
+            "Content-Type": "application/json",
+        }
+        body = dict(openai_body)
+        body.pop("max_output_tokens", None)
+        body["store"] = False
+        body["stream"] = True
+        if not body.get("instructions"):
+            body["instructions"] = "You are a helpful assistant."
+        return url, headers, body
+
+    # default: azure
+    url = (
+        f"{config.AZURE_ENDPOINT}/openai/v1/responses"
+        f"?api-version={config.AZURE_RESPONSES_API_VERSION}"
+    )
+    headers = {"api-key": config.AZURE_API_KEY, "Content-Type": "application/json"}
+    return url, headers, openai_body
+
+
+def _models_summary() -> dict:
+    if config.PROVIDER == "openai":
+        return {
+            "opus": config.OPENAI_MODEL_OPUS,
+            "sonnet": config.OPENAI_MODEL_SONNET,
+            "haiku": config.OPENAI_MODEL_HAIKU,
+        }
+    if config.PROVIDER == "codex":
+        return {
+            "opus": config.CODEX_MODEL_OPUS,
+            "sonnet": config.CODEX_MODEL_SONNET,
+            "haiku": config.CODEX_MODEL_HAIKU,
+        }
+    return {
+        "opus": config.DEPLOYMENT_OPUS,
+        "sonnet": config.DEPLOYMENT_SONNET,
+        "haiku": config.DEPLOYMENT_HAIKU,
+    }
+
+
+def _endpoint_summary() -> str:
+    if config.PROVIDER == "openai":
+        return config.OPENAI_BASE_URL
+    if config.PROVIDER == "codex":
+        return config.CODEX_ENDPOINT
+    return config.AZURE_ENDPOINT
 
 
 @app.get("/healthz")
 async def healthz():
     return {
         "ok": True,
-        "endpoint": config.AZURE_ENDPOINT,
-        "api": "responses",
-        "models": {
-            "opus": config.DEPLOYMENT_OPUS,
-            "sonnet": config.DEPLOYMENT_SONNET,
-            "haiku": config.DEPLOYMENT_HAIKU,
-        },
+        "provider": config.PROVIDER,
+        "endpoint": _endpoint_summary(),
+        "models": _models_summary(),
     }
 
 
@@ -77,20 +140,21 @@ async def messages(req: Request):
     deployment = config.map_model(requested_model)
     effort = config.map_reasoning_effort(requested_model)
     openai_body = anthropic_to_responses(body, deployment, effort)
+
     if openai_body.get("tools"):
         openai_body["reasoning"] = {"effort": config.TOOLS_REASONING}
         effort = config.TOOLS_REASONING
-        if config.TOOLS_DEPLOYMENT:
+        if config.TOOLS_DEPLOYMENT and config.PROVIDER == "azure":
             deployment = config.TOOLS_DEPLOYMENT
             openai_body["model"] = deployment
-    is_stream = bool(openai_body.get("stream"))
 
-    headers = {"api-key": config.AZURE_API_KEY, "Content-Type": "application/json"}
-    url = _azure_url()
+    url, headers, send_body = _build_request(openai_body)
+    is_stream = bool(send_body.get("stream"))
+
     log.info(
-        "→ %s → %s (stream=%s, items=%d, effort=%s)",
-        requested_model, deployment, is_stream,
-        len(openai_body.get("input", [])), effort,
+        "→ %s → %s (provider=%s, stream=%s, items=%d, effort=%s)",
+        requested_model, deployment, config.PROVIDER,
+        is_stream, len(send_body.get("input", [])), effort,
     )
 
     client = _client
@@ -98,14 +162,14 @@ async def messages(req: Request):
 
     if not is_stream:
         try:
-            r = await client.post(url, headers=headers, json=openai_body)
+            r = await client.post(url, headers=headers, json=send_body)
         except httpx.HTTPError as e:
             return JSONResponse(
                 status_code=502,
                 content={"type": "error", "error": {"type": "api_error", "message": str(e)}},
             )
         if r.status_code >= 400:
-            log.warning("Azure error %s: %s", r.status_code, r.text[:500])
+            log.warning("Backend error %s: %s", r.status_code, r.text[:500])
             return JSONResponse(
                 status_code=r.status_code,
                 content={"type": "error", "error": {"type": "api_error", "message": r.text[:2000]}},
@@ -114,10 +178,10 @@ async def messages(req: Request):
 
     async def stream_gen() -> AsyncIterator[bytes]:
         try:
-            async with client.stream("POST", url, headers=headers, json=openai_body) as r:
+            async with client.stream("POST", url, headers=headers, json=send_body) as r:
                 if r.status_code >= 400:
                     err = await r.aread()
-                    log.warning("Azure stream error %s: %s", r.status_code, err[:500])
+                    log.warning("Backend stream error %s: %s", r.status_code, err[:500])
                     payload = {
                         "type": "error",
                         "error": {
