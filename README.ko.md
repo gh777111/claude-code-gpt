@@ -4,7 +4,7 @@
 >
 > [English README](README.md)
 
-Anthropic Messages API ↔ OpenAI Responses API 변환만 하고, 나머지(도구, sub‑agent, MCP, 슬래시 명령)는 Claude Code가 그대로 처리합니다. UX는 그대로, 비용은 1/10 이하.
+Anthropic Messages API ↔ OpenAI Responses API 변환만 하고, 나머지(도구, sub‑agent, MCP, 슬래시 명령)는 Claude Code가 그대로 처리합니다. UX는 그대로, 청구는 본인이 선택한 백엔드로.
 
 ```
 Claude Code  ──►  claude-code-gpt  ──►  Azure / OpenAI / Codex
@@ -140,8 +140,8 @@ claude-code-gpt  ── 변환 ──►  POST /v1/responses   (OpenAI Responses
 ## 한계
 
 - **자동 변환이 안 되는 Anthropic 전용 기능들:** `cache_control` 마커 기반 prompt caching, extended thinking blocks, 일부 fine‑grained MCP 동작. 완벽 호환을 주장하지 않습니다 — 실용성 위주.
-- **내장 WebSearch / WebFetch 는 작동 안 함** — Anthropic 서버 측 도구라 우리가 흉내 못 냄. `crawlee` MCP 등으로 대체.
-- **모델이 자기를 "Claude"라고 우김** — Claude Code의 system prompt 페르소나를 강하게 따르는 것. 라우팅 로그와 본인 백엔드 청구 대시보드가 진짜 source of truth.
+- **내장 WebSearch / WebFetch 미지원** — Anthropic 서버 측 도구로, 이 프록시는 우회/대체하지 않습니다. `crawlee` MCP 등 별도 도구를 사용하세요.
+- **모델이 자기를 "Claude"라고 응답할 수 있음** — Claude Code의 system prompt 페르소나를 그대로 따르는 동작입니다. 실제 라우팅은 프록시 로그와 백엔드 청구 대시보드에서 확인하세요.
 - **ToS는 사용자 책임** — Claude Code를 비‑Anthropic 백엔드로 사용하는 건 본인 판단. 다른 백엔드도 마찬가지.
 
 ---
