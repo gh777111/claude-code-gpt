@@ -8,3 +8,9 @@ __pycache__/
 .env
 .claude/
 .measure.sh
+
+# Demo / scratch artifacts
+gpt55_tool_test_icon.png
+korean_sonagi_game.py
+tool_test_gpt55.txt
+한글타자_소나기.command

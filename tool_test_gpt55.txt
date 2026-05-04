@@ -1,3 +1,0 @@
-gpt-5.5 claude code tool test
-status: edited
-search_token: GPT55_TOOL_TEST

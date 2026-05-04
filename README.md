@@ -1,6 +1,8 @@
 # claude-code-gpt
 
 > Run [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) with **GPT‑5** as the backend — through Azure OpenAI, OpenAI direct, or your existing Codex CLI session.
+>
+> [한국어 README](README.ko.md)
 
 A tiny FastAPI proxy that translates Anthropic's Messages API into the OpenAI **Responses API**. Point Claude Code's `ANTHROPIC_BASE_URL` at it and the entire CLI keeps working — same UX, same tools, same sub‑agents — just running on GPT‑5 instead of Claude.
 
@@ -28,7 +30,7 @@ Real measurements from our own runs. Your mileage will vary, but the order of ma
 ## Quick start
 
 ```bash
-git clone https://github.com/YOUR/claude-code-gpt
+git clone https://github.com/gh777111/claude-code-gpt
 cd claude-code-gpt
 cp .env.example .env
 # edit .env with your provider + credentials
@@ -162,45 +164,3 @@ Four real source files. No framework lock‑in.
 MIT — see [LICENSE](LICENSE).
 
 Inspired by [aattaran/deepclaude](https://github.com/aattaran/deepclaude) (Claude Code → DeepSeek). Not affiliated with Anthropic, OpenAI, or Microsoft.
-
----
-
-## 한국어
-
-[Claude Code](https://docs.claude.com/en/docs/claude-code/overview)를 GPT‑5 백엔드로 사용하는 가벼운 프록시입니다. Anthropic Messages API ↔ OpenAI Responses API 변환만 하고, 나머지(도구, sub‑agent, MCP, 슬래시 명령)는 Claude Code가 그대로 처리합니다.
-
-**비용 비교 (동일한 작업 — 한글 타자게임 만들기, sonnet × sonnet sub‑agent):**
-
-| 백엔드 | 비용 |
-| --- | ---: |
-| Anthropic Opus 직접 (추정) | ~$15+ |
-| Azure GPT‑5.5 (이 프록시) | ~$4 |
-| Azure GPT‑5.4‑mini (이 프록시) | **~$0.43** |
-
-**빠른 시작:**
-
-```bash
-git clone https://github.com/YOUR/claude-code-gpt
-cd claude-code-gpt
-cp .env.example .env       # 본인 백엔드 정보 입력 (azure / openai / codex)
-uv sync
-ln -sf "$PWD/claudegpt" ~/.local/bin/claudegpt
-claudegpt
-```
-
-지원 백엔드: `azure` / `openai` / `codex`. `.env`에 `CLAUDEGPT_PROVIDER` 설정. 자세한 옵션은 위 영문 섹션 참조.
-
-**핵심 설계:**
-
-- Responses API 사용 (chat/completions 대신) — `reasoning_effort` + tools 동시 사용 가능, 스트리밍 의미가 더 정합적
-- 도구 인자의 빈 string은 자동 strip — Read 도구의 `pages` 같은 선택 파라미터로 인한 거부 loop 차단
-- 글로벌 `~/.claude/` 격리 default — system prompt 오버헤드 ~20k → ~6.6k 토큰
-- `MAX_THINKING_TOKENS=0`, `DISABLE_AUTOCOMPACT=1`, `DISABLE_NON_ESSENTIAL_MODEL_CALLS=1` 자동
-
-**알려진 한계:**
-
-- 모델이 자기를 "Claude"라고 말함 — Claude Code의 system prompt 페르소나를 그대로 따르는 것. 실제 라우팅은 프록시 로그와 백엔드 대시보드에서 확인 가능
-- 내장 WebSearch/WebFetch는 작동 안 함 — `crawlee` MCP 등으로 대체 권장
-- prompt caching의 `cache_control` 마커는 자동 변환 안 됨 (백엔드 자동 캐싱은 동작)
-
-라이선스: MIT. Anthropic / OpenAI / Microsoft와 무관.
