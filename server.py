@@ -78,6 +78,7 @@ async def messages(req: Request):
     requested_model = body.get("model", "")
     deployment = config.map_model(requested_model)
     openai_body = anthropic_to_openai(body)
+    openai_body["reasoning_effort"] = config.map_reasoning_effort(requested_model)
     is_stream = bool(openai_body.get("stream"))
 
     headers = {"api-key": config.AZURE_API_KEY, "Content-Type": "application/json"}

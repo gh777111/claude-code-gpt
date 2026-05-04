@@ -18,6 +18,11 @@ HOST = os.environ.get("CLAUDEGPT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("CLAUDEGPT_PORT", "3210"))
 
 
+REASONING_OPUS = os.environ.get("CLAUDEGPT_REASONING_OPUS", "medium")
+REASONING_SONNET = os.environ.get("CLAUDEGPT_REASONING_SONNET", "medium")
+REASONING_HAIKU = os.environ.get("CLAUDEGPT_REASONING_HAIKU", "medium")
+
+
 def map_model(claude_model: str) -> str:
     m = (claude_model or "").lower()
     if "haiku" in m:
@@ -27,3 +32,14 @@ def map_model(claude_model: str) -> str:
     if "sonnet" in m:
         return DEPLOYMENT_SONNET
     return DEPLOYMENT_SONNET
+
+
+def map_reasoning_effort(claude_model: str) -> str:
+    m = (claude_model or "").lower()
+    if "haiku" in m:
+        return REASONING_HAIKU
+    if "opus" in m:
+        return REASONING_OPUS
+    if "sonnet" in m:
+        return REASONING_SONNET
+    return REASONING_SONNET
