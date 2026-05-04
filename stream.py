@@ -30,6 +30,7 @@ async def responses_stream_to_anthropic(
 
     output_to_anth: dict[int, int] = {}
     output_kind: dict[int, str] = {}
+    tool_args_buffer: dict[int, str] = {}
     next_anth_idx = 0
     has_tool_use = False
     output_tokens = 0
@@ -84,18 +85,39 @@ async def responses_stream_to_anthropic(
 
         elif et == "response.function_call_arguments.delta":
             oi = evt.get("output_index", 0)
-            anth_idx = output_to_anth.get(oi)
-            if anth_idx is not None and output_kind.get(oi) == "tool_use":
-                yield _sse("content_block_delta", {
-                    "type": "content_block_delta",
-                    "index": anth_idx,
-                    "delta": {"type": "input_json_delta", "partial_json": evt.get("delta", "")},
-                })
+            if output_kind.get(oi) == "tool_use":
+                tool_args_buffer[oi] = tool_args_buffer.get(oi, "") + (evt.get("delta") or "")
 
         elif et == "response.output_item.done":
             oi = evt.get("output_index", 0)
             anth_idx = output_to_anth.get(oi)
-            if anth_idx is not None and output_kind.get(oi) in ("text", "tool_use"):
+            kind = output_kind.get(oi)
+            if anth_idx is None:
+                continue
+            if kind == "tool_use":
+                raw = tool_args_buffer.get(oi, "")
+                try:
+                    parsed = json.loads(raw or "{}")
+                    if isinstance(parsed, dict):
+                        cleaned = {k: v for k, v in parsed.items()
+                                   if v not in ("", None, [])}
+                        cleaned_json = json.dumps(cleaned, ensure_ascii=False)
+                    else:
+                        cleaned_json = raw
+                except (json.JSONDecodeError, TypeError):
+                    cleaned_json = raw
+                if cleaned_json and cleaned_json != "{}":
+                    yield _sse("content_block_delta", {
+                        "type": "content_block_delta",
+                        "index": anth_idx,
+                        "delta": {"type": "input_json_delta",
+                                  "partial_json": cleaned_json},
+                    })
+                yield _sse("content_block_stop", {
+                    "type": "content_block_stop",
+                    "index": anth_idx,
+                })
+            elif kind == "text":
                 yield _sse("content_block_stop", {
                     "type": "content_block_stop",
                     "index": anth_idx,
