@@ -83,6 +83,26 @@ CLAUDEGPT_GLOBAL_ISOLATE="${CLAUDEGPT_GLOBAL_ISOLATE:-1}"
 if [[ "$CLAUDEGPT_GLOBAL_ISOLATE" == "1" ]]; then
   CLEAN_CONFIG="${CLAUDEGPT_CLEAN_CONFIG_DIR:-/tmp/claudegpt-clean-config}"
   mkdir -p "$CLEAN_CONFIG"
+  if [[ ! -f "$CLEAN_CONFIG/settings.json" ]]; then
+    cat > "$CLEAN_CONFIG/settings.json" <<'JSON'
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Task",
+      "TodoWrite",
+      "WebFetch",
+      "NotebookEdit"
+    ]
+  }
+}
+JSON
+  fi
   export CLAUDE_CONFIG_DIR="$CLEAN_CONFIG"
 fi
 
