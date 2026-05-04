@@ -80,6 +80,9 @@ async def messages(req: Request):
     if openai_body.get("tools"):
         openai_body["reasoning"] = {"effort": config.TOOLS_REASONING}
         effort = config.TOOLS_REASONING
+        if config.TOOLS_DEPLOYMENT:
+            deployment = config.TOOLS_DEPLOYMENT
+            openai_body["model"] = deployment
     is_stream = bool(openai_body.get("stream"))
 
     headers = {"api-key": config.AZURE_API_KEY, "Content-Type": "application/json"}

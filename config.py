@@ -22,6 +22,7 @@ REASONING_OPUS = os.environ.get("CLAUDEGPT_REASONING_OPUS", "medium")
 REASONING_SONNET = os.environ.get("CLAUDEGPT_REASONING_SONNET", "medium")
 REASONING_HAIKU = os.environ.get("CLAUDEGPT_REASONING_HAIKU", "medium")
 TOOLS_REASONING = os.environ.get("CLAUDEGPT_TOOLS_REASONING", "low")
+TOOLS_DEPLOYMENT = os.environ.get("CLAUDEGPT_TOOLS_DEPLOYMENT", "")  # 빈 값이면 비활성화
 
 
 def map_model(claude_model: str) -> str:
