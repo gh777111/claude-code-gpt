@@ -21,6 +21,7 @@ PORT = int(os.environ.get("CLAUDEGPT_PORT", "3210"))
 REASONING_OPUS = os.environ.get("CLAUDEGPT_REASONING_OPUS", "medium")
 REASONING_SONNET = os.environ.get("CLAUDEGPT_REASONING_SONNET", "medium")
 REASONING_HAIKU = os.environ.get("CLAUDEGPT_REASONING_HAIKU", "medium")
+TOOLS_REASONING = os.environ.get("CLAUDEGPT_TOOLS_REASONING", "low")
 
 
 def map_model(claude_model: str) -> str:

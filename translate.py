@@ -6,6 +6,7 @@ CLAUDEGPT_SYSTEM_PREFIX = """[claudegpt: Azure OpenAI 백엔드 세션]
 - 내장 WebSearch / WebFetch는 결과가 비거나 부정확하므로 사용하지 않는다.
 - 웹 콘텐츠 수집/스크랩은 crawlee MCP (scrape / scrape_js / extract_links / crawl)로 처리한다.
 - 웹 검색이 필요하면 crawlee로 검색엔진 결과 페이지를 스크랩하거나 Brave Search MCP를 사용한다.
+- 도구를 호출할 때 선택적 파라미터에 빈 문자열("")을 보내지 마라. 사용하지 않는 파라미터는 키 자체를 생략해야 한다 (예: Read의 pages는 PDF 외에는 보내지 마라).
 """
 
 
@@ -180,6 +181,8 @@ def responses_to_anthropic(resp: dict, model: str) -> dict:
                 args = json.loads(item.get("arguments") or "{}")
             except (json.JSONDecodeError, TypeError):
                 args = {}
+            if isinstance(args, dict):
+                args = {k: v for k, v in args.items() if v not in ("", None, [])}
             blocks.append({
                 "type": "tool_use",
                 "id": item.get("call_id") or f"toolu_{uuid.uuid4().hex[:24]}",
