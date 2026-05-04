@@ -1,0 +1,7 @@
+#!/bin/bash
+DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$DIR" || exit 1
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 typegame.py
+fi
+osascript -e 'display dialog "python3를 찾을 수 없습니다. macOS에 Python 3를 설치한 뒤 다시 실행해주세요." buttons {"확인"} default button "확인"'
