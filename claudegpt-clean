@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# claudegpt-clean — claudegpt + isolated config dir + empty workspace
+# Skips global CLAUDE.md / agents / skills / MCP servers to measure
+# Claude Code baseline overhead.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+HOST="${CLAUDEGPT_HOST:-127.0.0.1}"
+PORT="${CLAUDEGPT_PORT:-3210}"
+PIDFILE="${TMPDIR:-/tmp}/claudegpt-${PORT}.pid"
+LOGFILE="${TMPDIR:-/tmp}/claudegpt-${PORT}.log"
+
+CLEAN_CONFIG="${CLAUDEGPT_CLEAN_CONFIG_DIR:-/tmp/claudegpt-clean-config}"
+CLEAN_WORKSPACE="${CLAUDEGPT_CLEAN_WORKSPACE:-$HOME/claudegpt-clean-workspace}"
+mkdir -p "$CLEAN_CONFIG" "$CLEAN_WORKSPACE"
+
+UV_BIN="${UV_BIN:-}"
+if [[ -z "$UV_BIN" ]]; then
+  if command -v uv >/dev/null 2>&1; then
+    UV_BIN="$(command -v uv)"
+  elif [[ -x "$HOME/.langflow/uv/uv" ]]; then
+    UV_BIN="$HOME/.langflow/uv/uv"
+  else
+    echo "[claudegpt-clean] uv not found; set UV_BIN" >&2
+    exit 1
+  fi
+fi
+
+if ! curl -fsS "http://${HOST}:${PORT}/healthz" >/dev/null 2>&1; then
+  echo "[claudegpt-clean] starting proxy on ${HOST}:${PORT}…" >&2
+  cd "$ROOT"
+  CLAUDEGPT_HOST="$HOST" CLAUDEGPT_PORT="$PORT" \
+    "$UV_BIN" run --quiet python server.py \
+    >"$LOGFILE" 2>&1 &
+  echo $! >"$PIDFILE"
+  for _ in $(seq 1 120); do
+    curl -fsS "http://${HOST}:${PORT}/healthz" >/dev/null 2>&1 && break
+    sleep 0.5
+  done
+fi
+
+# Anthropic backend redirect
+export ANTHROPIC_BASE_URL="http://${HOST}:${PORT}"
+export ANTHROPIC_AUTH_TOKEN="claudegpt-azure"
+export ANTHROPIC_API_KEY="claudegpt-azure"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-claude-opus-4-7}"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-claude-sonnet-4-6}"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-claude-haiku-4-5}"
+unset ANTHROPIC_MODEL || true
+
+# Cost-cutting envs
+export DISABLE_NON_ESSENTIAL_MODEL_CALLS="${DISABLE_NON_ESSENTIAL_MODEL_CALLS:-1}"
+export DISABLE_AUTOCOMPACT="${DISABLE_AUTOCOMPACT:-1}"
+export DISABLE_TELEMETRY="${DISABLE_TELEMETRY:-1}"
+export MAX_THINKING_TOKENS="${MAX_THINKING_TOKENS:-0}"
+
+# Isolation: empty config dir → no global CLAUDE.md / agents / skills / MCP
+export CLAUDE_CONFIG_DIR="$CLEAN_CONFIG"
+
+cd "$CLEAN_WORKSPACE"
+echo "[claudegpt-clean] CLAUDE_CONFIG_DIR=$CLEAN_CONFIG" >&2
+echo "[claudegpt-clean] cwd=$CLEAN_WORKSPACE" >&2
+exec claude "$@"

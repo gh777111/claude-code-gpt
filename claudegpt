@@ -77,4 +77,13 @@ export DISABLE_AUTOCOMPACT="${DISABLE_AUTOCOMPACT:-1}"
 export DISABLE_TELEMETRY="${DISABLE_TELEMETRY:-1}"
 export MAX_THINKING_TOKENS="${MAX_THINKING_TOKENS:-0}"
 
+# 글로벌 설정(전역 CLAUDE.md / agents / skills / MCP) 격리 — 토큰 절감
+# 프로젝트 ./CLAUDE.md 는 그대로 사용됨 (cwd 변경 안 함)
+CLAUDEGPT_GLOBAL_ISOLATE="${CLAUDEGPT_GLOBAL_ISOLATE:-1}"
+if [[ "$CLAUDEGPT_GLOBAL_ISOLATE" == "1" ]]; then
+  CLEAN_CONFIG="${CLAUDEGPT_CLEAN_CONFIG_DIR:-/tmp/claudegpt-clean-config}"
+  mkdir -p "$CLEAN_CONFIG"
+  export CLAUDE_CONFIG_DIR="$CLEAN_CONFIG"
+fi
+
 exec claude "$@"
