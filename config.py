@@ -9,6 +9,7 @@ load_dotenv(Path.home() / ".claude" / ".env", override=False)
 AZURE_ENDPOINT = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
 AZURE_API_KEY = os.environ["AZURE_OPENAI_API_KEY"]
 AZURE_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2025-04-01-preview")
+AZURE_RESPONSES_API_VERSION = os.environ.get("AZURE_OPENAI_RESPONSES_API_VERSION", "preview")
 
 DEPLOYMENT_OPUS = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT_FULL", "gpt-5-5")
 DEPLOYMENT_SONNET = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-54-mini")
@@ -16,7 +17,6 @@ DEPLOYMENT_HAIKU = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT_NANO", "gpt-54-n
 
 HOST = os.environ.get("CLAUDEGPT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("CLAUDEGPT_PORT", "3210"))
-
 
 REASONING_OPUS = os.environ.get("CLAUDEGPT_REASONING_OPUS", "medium")
 REASONING_SONNET = os.environ.get("CLAUDEGPT_REASONING_SONNET", "medium")

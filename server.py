@@ -9,8 +9,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 import config
-from translate import anthropic_to_openai, openai_to_anthropic_response
-from stream import openai_stream_to_anthropic
+from translate import anthropic_to_responses, responses_to_anthropic
+from stream import responses_stream_to_anthropic
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("claudegpt")
@@ -32,11 +32,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan, title="claudegpt")
 
 
-def _azure_url(deployment: str) -> str:
-    return (
-        f"{config.AZURE_ENDPOINT}/openai/deployments/{deployment}"
-        f"/chat/completions?api-version={config.AZURE_API_VERSION}"
-    )
+def _azure_url() -> str:
+    return f"{config.AZURE_ENDPOINT}/openai/v1/responses?api-version={config.AZURE_RESPONSES_API_VERSION}"
 
 
 @app.get("/healthz")
@@ -44,6 +41,7 @@ async def healthz():
     return {
         "ok": True,
         "endpoint": config.AZURE_ENDPOINT,
+        "api": "responses",
         "models": {
             "opus": config.DEPLOYMENT_OPUS,
             "sonnet": config.DEPLOYMENT_SONNET,
@@ -77,16 +75,16 @@ async def messages(req: Request):
     body = await req.json()
     requested_model = body.get("model", "")
     deployment = config.map_model(requested_model)
-    openai_body = anthropic_to_openai(body)
-    if not openai_body.get("tools"):
-        openai_body["reasoning_effort"] = config.map_reasoning_effort(requested_model)
+    effort = config.map_reasoning_effort(requested_model)
+    openai_body = anthropic_to_responses(body, deployment, effort)
     is_stream = bool(openai_body.get("stream"))
 
     headers = {"api-key": config.AZURE_API_KEY, "Content-Type": "application/json"}
-    url = _azure_url(deployment)
+    url = _azure_url()
     log.info(
-        "→ %s → %s (stream=%s, msgs=%d)",
-        requested_model, deployment, is_stream, len(openai_body.get("messages", [])),
+        "→ %s → %s (stream=%s, items=%d, effort=%s)",
+        requested_model, deployment, is_stream,
+        len(openai_body.get("input", [])), effort,
     )
 
     client = _client
@@ -106,7 +104,7 @@ async def messages(req: Request):
                 status_code=r.status_code,
                 content={"type": "error", "error": {"type": "api_error", "message": r.text[:2000]}},
             )
-        return JSONResponse(content=openai_to_anthropic_response(r.json(), requested_model))
+        return JSONResponse(content=responses_to_anthropic(r.json(), requested_model))
 
     async def stream_gen() -> AsyncIterator[bytes]:
         try:
@@ -139,7 +137,7 @@ async def messages(req: Request):
                         except json.JSONDecodeError:
                             continue
 
-                async for sse in openai_stream_to_anthropic(parsed(), requested_model):
+                async for sse in responses_stream_to_anthropic(parsed(), requested_model):
                     yield sse
         except httpx.HTTPError as e:
             payload = {"type": "error", "error": {"type": "api_error", "message": str(e)}}

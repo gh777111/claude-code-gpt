@@ -2,25 +2,17 @@ import json
 import uuid
 from typing import AsyncIterator
 
-from translate import map_finish_reason
-
 
 def _sse(event: str, data: dict) -> bytes:
     payload = json.dumps(data, ensure_ascii=False)
     return f"event: {event}\ndata: {payload}\n\n".encode("utf-8")
 
 
-async def openai_stream_to_anthropic(
-    chunks: AsyncIterator[dict],
+async def responses_stream_to_anthropic(
+    events: AsyncIterator[dict],
     model: str,
 ) -> AsyncIterator[bytes]:
     msg_id = f"msg_{uuid.uuid4().hex[:24]}"
-    text_open = False
-    text_index = -1
-    next_index = 0
-    tool_state: dict[int, dict] = {}
-    finish_reason: str | None = None
-    output_tokens = 0
 
     yield _sse("message_start", {
         "type": "message_start",
@@ -36,104 +28,110 @@ async def openai_stream_to_anthropic(
         },
     })
 
-    async for chunk in chunks:
-        u = chunk.get("usage")
-        if u:
-            output_tokens = u.get("completion_tokens", output_tokens)
+    output_to_anth: dict[int, int] = {}
+    output_kind: dict[int, str] = {}
+    next_anth_idx = 0
+    has_tool_use = False
+    output_tokens = 0
+    stop_reason = "end_turn"
 
-        choices = chunk.get("choices") or []
-        if not choices:
-            continue
-        choice = choices[0]
-        delta = choice.get("delta") or {}
+    async for evt in events:
+        et = evt.get("type") or ""
 
-        text = delta.get("content")
-        if text:
-            if not text_open:
-                text_index = next_index
-                next_index += 1
+        if et == "response.output_item.added":
+            item = evt.get("item") or {}
+            oi = evt.get("output_index", 0)
+            it = item.get("type")
+            if it == "message":
+                anth_idx = next_anth_idx
+                next_anth_idx += 1
+                output_to_anth[oi] = anth_idx
+                output_kind[oi] = "text"
                 yield _sse("content_block_start", {
                     "type": "content_block_start",
-                    "index": text_index,
+                    "index": anth_idx,
                     "content_block": {"type": "text", "text": ""},
                 })
-                text_open = True
-            yield _sse("content_block_delta", {
-                "type": "content_block_delta",
-                "index": text_index,
-                "delta": {"type": "text_delta", "text": text},
-            })
-
-        for tc in (delta.get("tool_calls") or []):
-            oai_idx = tc.get("index", 0)
-            fn = tc.get("function") or {}
-            state = tool_state.get(oai_idx)
-            if state is None:
-                if text_open:
-                    yield _sse("content_block_stop", {
-                        "type": "content_block_stop",
-                        "index": text_index,
-                    })
-                    text_open = False
-                state = {
-                    "anth_idx": next_index,
-                    "id": tc.get("id") or "",
-                    "name": fn.get("name") or "",
-                    "opened": False,
-                }
-                next_index += 1
-                tool_state[oai_idx] = state
-            else:
-                if tc.get("id"):
-                    state["id"] = tc["id"]
-                if fn.get("name"):
-                    state["name"] = fn["name"]
-
-            if not state["opened"] and state["name"]:
-                if not state["id"]:
-                    state["id"] = f"toolu_{uuid.uuid4().hex[:24]}"
+            elif it == "function_call":
+                anth_idx = next_anth_idx
+                next_anth_idx += 1
+                output_to_anth[oi] = anth_idx
+                output_kind[oi] = "tool_use"
+                has_tool_use = True
+                tid = item.get("call_id") or f"toolu_{uuid.uuid4().hex[:24]}"
                 yield _sse("content_block_start", {
                     "type": "content_block_start",
-                    "index": state["anth_idx"],
+                    "index": anth_idx,
                     "content_block": {
                         "type": "tool_use",
-                        "id": state["id"],
-                        "name": state["name"],
+                        "id": tid,
+                        "name": item.get("name", ""),
                         "input": {},
                     },
                 })
-                state["opened"] = True
+            else:
+                output_kind[oi] = "skip"
 
-            args_piece = fn.get("arguments")
-            if args_piece and state["opened"]:
+        elif et == "response.output_text.delta":
+            oi = evt.get("output_index", 0)
+            anth_idx = output_to_anth.get(oi)
+            if anth_idx is not None and output_kind.get(oi) == "text":
                 yield _sse("content_block_delta", {
                     "type": "content_block_delta",
-                    "index": state["anth_idx"],
-                    "delta": {"type": "input_json_delta", "partial_json": args_piece},
+                    "index": anth_idx,
+                    "delta": {"type": "text_delta", "text": evt.get("delta", "")},
                 })
 
-        fr = choice.get("finish_reason")
-        if fr:
-            finish_reason = fr
+        elif et == "response.function_call_arguments.delta":
+            oi = evt.get("output_index", 0)
+            anth_idx = output_to_anth.get(oi)
+            if anth_idx is not None and output_kind.get(oi) == "tool_use":
+                yield _sse("content_block_delta", {
+                    "type": "content_block_delta",
+                    "index": anth_idx,
+                    "delta": {"type": "input_json_delta", "partial_json": evt.get("delta", "")},
+                })
 
-    if text_open:
-        yield _sse("content_block_stop", {
-            "type": "content_block_stop",
-            "index": text_index,
-        })
-    for state in tool_state.values():
-        if state["opened"]:
-            yield _sse("content_block_stop", {
-                "type": "content_block_stop",
-                "index": state["anth_idx"],
-            })
+        elif et == "response.output_item.done":
+            oi = evt.get("output_index", 0)
+            anth_idx = output_to_anth.get(oi)
+            if anth_idx is not None and output_kind.get(oi) in ("text", "tool_use"):
+                yield _sse("content_block_stop", {
+                    "type": "content_block_stop",
+                    "index": anth_idx,
+                })
+
+        elif et == "response.completed":
+            resp = evt.get("response") or {}
+            usage = resp.get("usage") or {}
+            output_tokens = usage.get("output_tokens", output_tokens)
+            incomplete = resp.get("incomplete_details") or {}
+            if has_tool_use:
+                stop_reason = "tool_use"
+            elif incomplete.get("reason") == "max_output_tokens":
+                stop_reason = "max_tokens"
+            else:
+                stop_reason = "end_turn"
+
+        elif et == "response.incomplete":
+            resp = evt.get("response") or {}
+            usage = resp.get("usage") or {}
+            output_tokens = usage.get("output_tokens", output_tokens)
+            incomplete = resp.get("incomplete_details") or {}
+            if incomplete.get("reason") == "max_output_tokens":
+                stop_reason = "max_tokens"
+
+        elif et == "response.failed":
+            resp = evt.get("response") or {}
+            err = resp.get("error") or {}
+            payload = {"type": "error",
+                       "error": {"type": "api_error",
+                                 "message": err.get("message", "responses.failed")}}
+            yield f"event: error\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
 
     yield _sse("message_delta", {
         "type": "message_delta",
-        "delta": {
-            "stop_reason": map_finish_reason(finish_reason),
-            "stop_sequence": None,
-        },
+        "delta": {"stop_reason": stop_reason, "stop_sequence": None},
         "usage": {"output_tokens": output_tokens},
     })
     yield _sse("message_stop", {"type": "message_stop"})

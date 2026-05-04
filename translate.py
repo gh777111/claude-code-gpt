@@ -19,135 +19,126 @@ def _system_to_text(system) -> str:
     return str(system)
 
 
-def _user_blocks(content: list) -> tuple[object, list]:
-    parts: list = []
-    tool_results: list = []
-    extra_images: list = []
-    for block in content:
-        t = block.get("type")
-        if t == "text":
-            parts.append({"type": "text", "text": block.get("text", "")})
-        elif t == "image":
-            src = block.get("source", {})
-            if src.get("type") == "base64":
-                url = f"data:{src.get('media_type', 'image/png')};base64,{src.get('data', '')}"
-            elif src.get("type") == "url":
-                url = src.get("url", "")
-            else:
-                continue
-            parts.append({"type": "image_url", "image_url": {"url": url}})
-        elif t == "tool_result":
-            tr = block.get("content")
-            tr_text = ""
-            if isinstance(tr, list):
-                chunks: list = []
-                for b in tr:
-                    bt = b.get("type")
-                    if bt == "text":
-                        chunks.append(b.get("text", ""))
-                    elif bt == "image":
-                        src = b.get("source", {})
-                        if src.get("type") == "base64":
-                            url = f"data:{src.get('media_type', 'image/png')};base64,{src.get('data', '')}"
-                        elif src.get("type") == "url":
-                            url = src.get("url", "")
-                        else:
-                            continue
-                        extra_images.append({"type": "image_url", "image_url": {"url": url}})
-                tr_text = "".join(chunks)
-            elif isinstance(tr, str):
-                tr_text = tr
-            elif tr is None:
-                tr_text = ""
-            else:
-                tr_text = json.dumps(tr, ensure_ascii=False)
-            tool_results.append({
-                "role": "tool",
-                "tool_call_id": block.get("tool_use_id"),
-                "content": tr_text,
-            })
-    parts = extra_images + parts
-    if parts and all(p.get("type") == "text" for p in parts):
-        return "".join(p["text"] for p in parts), tool_results
-    return parts, tool_results
+def _image_url_from_source(src: dict) -> str | None:
+    t = src.get("type")
+    if t == "base64":
+        return f"data:{src.get('media_type', 'image/png')};base64,{src.get('data', '')}"
+    if t == "url":
+        return src.get("url") or None
+    return None
 
 
-def _assistant_blocks(content: list) -> tuple[str, list]:
-    text_parts: list = []
-    tool_calls: list = []
-    for block in content:
-        t = block.get("type")
-        if t == "text":
-            text_parts.append(block.get("text", ""))
-        elif t == "tool_use":
-            tool_calls.append({
-                "id": block.get("id") or f"call_{uuid.uuid4().hex[:24]}",
-                "type": "function",
-                "function": {
-                    "name": block.get("name", ""),
-                    "arguments": json.dumps(block.get("input", {}), ensure_ascii=False),
-                },
-            })
-    return "".join(text_parts), tool_calls
-
-
-def anthropic_to_openai_messages(req: dict) -> list[dict]:
-    msgs: list[dict] = []
-    sys_text = _system_to_text(req.get("system"))
-    combined = CLAUDEGPT_SYSTEM_PREFIX + ("\n" + sys_text if sys_text.strip() else "")
-    msgs.append({"role": "system", "content": combined.strip()})
-
+def _to_responses_input(req: dict) -> list:
+    items: list = []
     for m in req.get("messages", []):
         role = m.get("role")
         content = m.get("content")
+
         if isinstance(content, str):
-            msgs.append({"role": role, "content": content})
+            kind = "output_text" if role == "assistant" else "input_text"
+            items.append({
+                "type": "message",
+                "role": role,
+                "content": [{"type": kind, "text": content}],
+            })
             continue
         if not isinstance(content, list):
             continue
 
         if role == "assistant":
-            text, tool_calls = _assistant_blocks(content)
-            am: dict = {"role": "assistant", "content": text or ""}
-            if tool_calls:
-                am["tool_calls"] = tool_calls
-            msgs.append(am)
+            text_chunks: list = []
+            calls: list = []
+            for block in content:
+                bt = block.get("type")
+                if bt == "text":
+                    text_chunks.append(block.get("text", ""))
+                elif bt == "tool_use":
+                    calls.append({
+                        "type": "function_call",
+                        "call_id": block.get("id"),
+                        "name": block.get("name", ""),
+                        "arguments": json.dumps(block.get("input", {}), ensure_ascii=False),
+                    })
+            text = "".join(text_chunks)
+            if text:
+                items.append({
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": text}],
+                })
+            items.extend(calls)
         else:
-            user_content, tool_results = _user_blocks(content)
-            for tr in tool_results:
-                msgs.append(tr)
-            if isinstance(user_content, str):
-                if user_content:
-                    msgs.append({"role": "user", "content": user_content})
-            elif user_content:
-                msgs.append({"role": "user", "content": user_content})
-    return msgs
+            user_parts: list = []
+            tool_outputs: list = []
+            extra_images: list = []
+            for block in content:
+                bt = block.get("type")
+                if bt == "text":
+                    user_parts.append({"type": "input_text", "text": block.get("text", "")})
+                elif bt == "image":
+                    url = _image_url_from_source(block.get("source", {}))
+                    if url:
+                        user_parts.append({"type": "input_image", "image_url": url})
+                elif bt == "tool_result":
+                    tr = block.get("content")
+                    tr_text = ""
+                    if isinstance(tr, list):
+                        chunks: list = []
+                        for b in tr:
+                            ct = b.get("type")
+                            if ct == "text":
+                                chunks.append(b.get("text", ""))
+                            elif ct == "image":
+                                url = _image_url_from_source(b.get("source", {}))
+                                if url:
+                                    extra_images.append({"type": "input_image", "image_url": url})
+                        tr_text = "".join(chunks)
+                    elif isinstance(tr, str):
+                        tr_text = tr
+                    elif tr is None:
+                        tr_text = ""
+                    else:
+                        tr_text = json.dumps(tr, ensure_ascii=False)
+                    tool_outputs.append({
+                        "type": "function_call_output",
+                        "call_id": block.get("tool_use_id"),
+                        "output": tr_text,
+                    })
+            items.extend(tool_outputs)
+            full_user = extra_images + user_parts
+            if full_user:
+                items.append({
+                    "type": "message",
+                    "role": "user",
+                    "content": full_user,
+                })
+    return items
 
 
-def anthropic_to_openai(req: dict) -> dict:
+def anthropic_to_responses(req: dict, deployment: str, reasoning_effort: str | None) -> dict:
+    sys_text = _system_to_text(req.get("system"))
+    instructions = CLAUDEGPT_SYSTEM_PREFIX + ("\n" + sys_text if sys_text.strip() else "")
     body: dict = {
-        "messages": anthropic_to_openai_messages(req),
+        "model": deployment,
+        "input": _to_responses_input(req),
+        "instructions": instructions.strip(),
         "stream": bool(req.get("stream", False)),
     }
     if (mt := req.get("max_tokens")):
-        body["max_completion_tokens"] = mt
+        body["max_output_tokens"] = mt
     if (temp := req.get("temperature")) is not None:
         body["temperature"] = temp
     if (top_p := req.get("top_p")) is not None:
         body["top_p"] = top_p
-    if (stop := req.get("stop_sequences")):
-        body["stop"] = stop
 
     tools = req.get("tools")
     if tools:
         body["tools"] = [
             {
                 "type": "function",
-                "function": {
-                    "name": t.get("name"),
-                    "description": t.get("description", ""),
-                    "parameters": t.get("input_schema") or {"type": "object", "properties": {}},
-                },
+                "name": t.get("name"),
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema") or {"type": "object", "properties": {}},
             }
             for t in tools
         ]
@@ -159,49 +150,44 @@ def anthropic_to_openai(req: dict) -> dict:
             elif ct == "any":
                 body["tool_choice"] = "required"
             elif ct == "tool":
-                body["tool_choice"] = {
-                    "type": "function",
-                    "function": {"name": tc.get("name")},
-                }
+                body["tool_choice"] = {"type": "function", "name": tc.get("name")}
 
-    if body["stream"]:
-        body["stream_options"] = {"include_usage": True}
+    if reasoning_effort:
+        body["reasoning"] = {"effort": reasoning_effort}
 
     return body
 
 
-_STOP_REASON = {
-    "stop": "end_turn",
-    "length": "max_tokens",
-    "tool_calls": "tool_use",
-    "function_call": "tool_use",
-    "content_filter": "end_turn",
-}
+def _stop_reason(resp: dict, has_tool_use: bool) -> str:
+    if has_tool_use:
+        return "tool_use"
+    incomplete = resp.get("incomplete_details") or {}
+    if incomplete.get("reason") == "max_output_tokens":
+        return "max_tokens"
+    return "end_turn"
 
 
-def map_finish_reason(fr: str | None) -> str:
-    return _STOP_REASON.get(fr or "stop", "end_turn")
-
-
-def openai_to_anthropic_response(resp: dict, model: str) -> dict:
-    choice = resp["choices"][0]
-    msg = choice.get("message", {}) or {}
+def responses_to_anthropic(resp: dict, model: str) -> dict:
     blocks: list = []
-    text = msg.get("content")
-    if text:
-        blocks.append({"type": "text", "text": text})
-    for tc in (msg.get("tool_calls") or []):
-        try:
-            args = json.loads(tc["function"].get("arguments") or "{}")
-        except (json.JSONDecodeError, TypeError):
-            args = {}
-        blocks.append({
-            "type": "tool_use",
-            "id": tc.get("id") or f"toolu_{uuid.uuid4().hex[:24]}",
-            "name": tc["function"]["name"],
-            "input": args,
-        })
+    for item in resp.get("output", []) or []:
+        it = item.get("type")
+        if it == "message":
+            for c in item.get("content", []) or []:
+                if c.get("type") == "output_text":
+                    blocks.append({"type": "text", "text": c.get("text", "")})
+        elif it == "function_call":
+            try:
+                args = json.loads(item.get("arguments") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                args = {}
+            blocks.append({
+                "type": "tool_use",
+                "id": item.get("call_id") or f"toolu_{uuid.uuid4().hex[:24]}",
+                "name": item.get("name", ""),
+                "input": args,
+            })
 
+    has_tool = any(b.get("type") == "tool_use" for b in blocks)
     usage = resp.get("usage") or {}
     return {
         "id": resp.get("id") or f"msg_{uuid.uuid4().hex[:24]}",
@@ -209,10 +195,10 @@ def openai_to_anthropic_response(resp: dict, model: str) -> dict:
         "role": "assistant",
         "model": model,
         "content": blocks,
-        "stop_reason": map_finish_reason(choice.get("finish_reason")),
+        "stop_reason": _stop_reason(resp, has_tool),
         "stop_sequence": None,
         "usage": {
-            "input_tokens": usage.get("prompt_tokens", 0),
-            "output_tokens": usage.get("completion_tokens", 0),
+            "input_tokens": usage.get("input_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0),
         },
     }
