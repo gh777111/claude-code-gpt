@@ -56,7 +56,7 @@ BLOCK_MCP = os.environ.get("CLAUDEGPT_BLOCK_MCP", "").strip().lower() not in (""
 
 # Comma-separated tool names to drop from the request.  Per-turn savings vary;
 # safe defaults below cover tools the user has confirmed unused on this setup.
-_DROP_DEFAULT = "NotebookEdit,WebSearch,WebFetch,EnterWorktree,ExitWorktree"
+_DROP_DEFAULT = "NotebookEdit,WebSearch,WebFetch"
 DROP_TOOLS = {
     n.strip()
     for n in os.environ.get("CLAUDEGPT_DROP_TOOLS", _DROP_DEFAULT).split(",")
