@@ -201,6 +201,11 @@ async def messages(req: Request):
             deployment = config.TOOLS_DEPLOYMENT
             openai_body["model"] = deployment
 
+    # /effort from Claude Code (Anthropic `thinking` field) wins over tier + tools defaults.
+    if (override := config.effort_from_thinking(body.get("thinking"))):
+        effort = override
+        openai_body["reasoning"] = {"effort": effort}
+
     client_wants_stream = bool(openai_body.get("stream"))
     url, headers, send_body = _build_request(openai_body)
     backend_stream = bool(send_body.get("stream"))

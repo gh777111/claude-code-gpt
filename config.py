@@ -82,3 +82,21 @@ def map_reasoning_effort(claude_model: str) -> str:
     if "sonnet" in m:
         return REASONING_SONNET
     return REASONING_SONNET
+
+
+def effort_from_thinking(thinking: dict | None) -> str | None:
+    """Anthropic `thinking.budget_tokens` (set by Claude Code /effort) → OpenAI reasoning effort."""
+    if not isinstance(thinking, dict) or thinking.get("type") != "enabled":
+        return None
+    budget = thinking.get("budget_tokens", 0)
+    try:
+        budget = int(budget)
+    except (TypeError, ValueError):
+        return None
+    if budget <= 0:
+        return None
+    if budget <= 4096:
+        return "low"
+    if budget <= 12288:
+        return "medium"
+    return "high"
