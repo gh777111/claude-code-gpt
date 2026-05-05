@@ -117,6 +117,79 @@ CLAUDEGPT_REASONING_HAIKU=medium
 CLAUDEGPT_TOOLS_REASONING=low
 ```
 
+The launcher also intercepts Claude Code's `--effort` flag (or `claudegpt --effort medium`) and applies the requested effort across all tiers for that invocation. The proxy auto‑restarts when the effort changes — Claude Code itself does not forward `thinking` to non‑Anthropic backends, so this launcher‑side translation is what makes `--effort` actually do anything here.
+
+---
+
+## Web tools
+
+Anthropic's `WebSearch` and `WebFetch` are server‑side tools — they only work when Claude is talking to Anthropic's own backend. The proxy reproduces both on the GPT side:
+
+### WebSearch → Azure hosted `web_search`
+
+When Claude Code declares `WebSearch` in the request, the proxy rewrites it to `{"type":"web_search"}` and lets Azure's hosted tool do the actual searching. The model gets results inline, citations and all.
+
+```bash
+CLAUDEGPT_MAP_WEB_SEARCH=1   # default; set 0 to drop instead
+```
+
+Cost: charged per search by Azure (typically ~$0.025 / call), in addition to model tokens.
+
+### WebFetch → local 2‑stage urllib + summarizer
+
+Mirrors Anthropic's architecture: fetch the URL with `urllib`, run a small‑model first‑stage to extract the relevant slice per the user's `prompt`, then feed only that compact result to the main model. Emits `server_tool_use` + `web_fetch_tool_result` content blocks identical to Anthropic's native shape.
+
+```bash
+CLAUDEGPT_MAP_WEB_FETCH=1                          # default
+CLAUDEGPT_WEB_FETCH_SUMMARIZER=gpt-54-nano         # 1st-stage model; empty disables
+CLAUDEGPT_WEB_FETCH_TIMEOUT=15
+CLAUDEGPT_WEB_FETCH_MAX_CHARS=50000                # raw fetch cap
+CLAUDEGPT_WEB_FETCH_SUMMARY_MAX_CHARS=4000         # 1st-stage output cap
+CLAUDEGPT_WEB_FETCH_MAX_CHAIN=4                    # max fetches per turn
+```
+
+This keeps the main model's context small even on huge pages — same trick Anthropic uses to keep WebFetch from blowing up your token budget.
+
+---
+
+## Tool customization
+
+The proxy can selectively block tool declarations before they reach the backend, saving a few thousand tokens per turn and avoiding tools that can't work over GPT.
+
+```bash
+# Strip MCP-server tool declarations (mcp__*). Useful when you keep ~/.claude
+# settings (CLAUDE.md, commands, permissions) but want the per-turn overhead
+# of MCP servers off your bill.
+CLAUDEGPT_BLOCK_MCP=1
+
+# Drop specific tools by name. Default drops NotebookEdit (most users don't
+# touch .ipynb).
+CLAUDEGPT_DROP_TOOLS=NotebookEdit,Bash      # example: hand all shell to /codex-exec
+```
+
+---
+
+## Tracing
+
+Every turn writes a self‑contained JSON trace under `<repo>/traces/<cwd-tag>/<ts>-<id>.json`. Default on; flip `CLAUDEGPT_TRACE=0` to disable.
+
+```bash
+CLAUDEGPT_TRACE=1                          # default
+CLAUDEGPT_TRACE_DIR=/some/other/path       # default <repo>/traces
+```
+
+Each file holds the incoming Anthropic request, the outgoing OpenAI body, the streamed Azure events (when stream mode), the translated Anthropic response, plus timing/effort/model metadata. WebFetch chains record per-round info under `chain_rounds`. Inspect with `jq` or any editor — the format is human‑readable.
+
+```bash
+$ jq '{model: .request_anthropic.model,
+       deployment, effort,
+       fetches: (.chain_rounds // [] | map(.fetches // []) | add),
+       cost: .duration_ms}' \
+     traces/*/20260505T*.json
+```
+
+`traces/` is git‑ignored — trace files contain user prompts.
+
 ---
 
 ## How it works
@@ -135,16 +208,21 @@ claude-code-gpt  ── translate ──►  POST /v1/responses   (OpenAI Respon
 Key implementation choices:
 
 - **Responses API**, not chat/completions — required for `reasoning_effort` + tools simultaneously, plus better stream semantics.
+- **Body field order = stable prefix first** (`instructions` → `tools` → `input`). Azure's automatic prefix cache hashes the leading 1,024 tokens, so we keep the boilerplate up front and the conversation history at the tail.
+- **24h cache retention** auto‑injected on Azure (`prompt_cache_retention: "24h"`), extending the default 5–10 minute TTL to a full day. Cuts repeat‑prefix cost across long sessions.
 - **Tool args buffered + cleaned** — empty optional parameters (e.g. Read's `pages`) are stripped before reaching Claude Code, fixing the most common "tool call rejected" loop.
+- **WebFetch chain controller** — when the model issues `function_call(name="WebFetch")`, the proxy intercepts mid‑stream, runs urllib + a small‑model summarizer, then continues a fresh Azure call with the result spliced into the same Anthropic message envelope. Multi-fetch chaining up to `MAX_CHAIN`.
 - **Global config isolation** — by default the launcher exports `CLAUDE_CONFIG_DIR=/tmp/claudegpt-clean-config` so Claude Code skips your global `~/.claude/` (CLAUDE.md, MCP, skills, agents). This alone cut our system‑prompt overhead from ~20k to ~6.6k tokens. Disable with `CLAUDEGPT_GLOBAL_ISOLATE=0` if you want your global setup back.
+- **Launcher reads .env directly** — `~/.claude/.env` and `<repo>/.env` are parsed for `CLAUDEGPT_*` keys, so settings work regardless of which shell rc your terminal/IDE actually loaded.
 - **Cost‑cutting envs** — `DISABLE_NON_ESSENTIAL_MODEL_CALLS=1`, `DISABLE_AUTOCOMPACT=1`, `MAX_THINKING_TOKENS=0` exported by the launcher.
 
 ---
 
 ## Limitations
 
-- **Anthropic-only features that don't translate cleanly:** prompt caching with `cache_control` markers, extended thinking blocks, and some fine-grained MCP behaviors. We don't claim parity, just usability.
-- **Built-in WebSearch / WebFetch** are not faked — Claude Code's server-side web tools are Anthropic's, not ours. Use a `crawlee` or Brave‑Search MCP instead.
+- **Anthropic prompt caching with `cache_control` markers** is not translated. We rely on Azure's automatic prefix cache (with 24h retention) instead — quieter, less explicit, but functional.
+- **Citations format**: WebSearch results come back as inline markdown links rather than Anthropic's distinct citation blocks. Content is identical; the rendering is slightly different in Claude Code's UI.
+- **WebFetch on dynamic JS sites**: pure urllib, no headless browser. Sites that need JS execution will return mostly chrome (nav menus, etc.). Public APIs, static HTML, and simple SSR pages work great.
 - **The model will insist it is Claude** when you ask. That's just how strongly it follows the Claude Code system prompt; the routing logs and your provider's billing dashboard are the real source of truth.
 - **You are responsible for ToS** — using Claude Code with a non‑Anthropic backend is your call. Same for any backend.
 
@@ -157,13 +235,16 @@ claude-code-gpt/
 ├── claudegpt          # bash launcher: boots proxy, exports envs, execs `claude`
 ├── server.py          # FastAPI app, provider dispatch, SSE collect-to-json
 ├── translate.py       # Anthropic Messages ↔ OpenAI Responses input/output
-├── stream.py          # Responses SSE → Anthropic SSE
+├── stream.py          # Responses SSE → Anthropic SSE (default driver)
+├── chain.py           # WebFetch chain controller — runs fetches mid-stream
+├── webfetch.py        # urllib + stdlib HTML→text + Anthropic-shape result blocks
+├── trace.py           # per-turn request/response JSON dump (cwd-grouped)
 ├── config.py          # env loading + model + reasoning_effort mapping
 ├── pyproject.toml     # fastapi / uvicorn / httpx / python-dotenv
 └── .env.example
 ```
 
-Four real source files. No framework lock‑in.
+Seven small source files. No framework lock‑in.
 
 ---
 
