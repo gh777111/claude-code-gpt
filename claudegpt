@@ -26,6 +26,18 @@ if [[ -z "$UV_BIN" ]]; then
   fi
 fi
 
+# Pull launcher-level CLAUDEGPT_* keys from .env files so settings work regardless
+# of which shell rc the calling environment loaded. Existing env wins.
+for envfile in "$HOME/.claude/.env" "$ROOT/.env"; do
+  [[ -f "$envfile" ]] || continue
+  while IFS='=' read -r key val; do
+    [[ "$key" == CLAUDEGPT_* ]] || continue
+    [[ -z "${!key:-}" ]] || continue
+    val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
+    export "$key=$val"
+  done < <(grep -E '^CLAUDEGPT_[A-Z_]+=' "$envfile" 2>/dev/null || true)
+done
+
 # Pass cwd through to the proxy so traces can be grouped per project.
 export CLAUDEGPT_CWD="$(pwd)"
 
