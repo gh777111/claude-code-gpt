@@ -111,20 +111,18 @@ def _to_responses_input(req: dict) -> list:
 
 
 def anthropic_to_responses(req: dict, deployment: str, reasoning_effort: str | None) -> dict:
+    """Build the OpenAI Responses body. Field-order intent: stable prefix first
+    (instructions → tools), volatile last (input messages), so Azure's prefix
+    cache hashes the same boilerplate across turns."""
     sys_text = _system_to_text(req.get("system"))
     body: dict = {
         "model": deployment,
-        "input": _to_responses_input(req),
         "stream": bool(req.get("stream", False)),
     }
     if sys_text.strip():
         body["instructions"] = sys_text
-    if (mt := req.get("max_tokens")):
-        body["max_output_tokens"] = mt
-    if (temp := req.get("temperature")) is not None:
-        body["temperature"] = temp
-    if (top_p := req.get("top_p")) is not None:
-        body["top_p"] = top_p
+    if reasoning_effort:
+        body["reasoning"] = {"effort": reasoning_effort}
 
     tools = req.get("tools")
     if tools:
@@ -149,8 +147,15 @@ def anthropic_to_responses(req: dict, deployment: str, reasoning_effort: str | N
             elif ct == "tool":
                 body["tool_choice"] = {"type": "function", "name": tc.get("name")}
 
-    if reasoning_effort:
-        body["reasoning"] = {"effort": reasoning_effort}
+    # volatile content goes last so the cacheable prefix above stays stable
+    body["input"] = _to_responses_input(req)
+
+    if (mt := req.get("max_tokens")):
+        body["max_output_tokens"] = mt
+    if (temp := req.get("temperature")) is not None:
+        body["temperature"] = temp
+    if (top_p := req.get("top_p")) is not None:
+        body["top_p"] = top_p
 
     return body
 

@@ -74,7 +74,11 @@ def _build_request(openai_body: dict) -> tuple[str, dict, dict]:
         f"?api-version={config.AZURE_RESPONSES_API_VERSION}"
     )
     headers = {"api-key": config.AZURE_API_KEY, "Content-Type": "application/json"}
-    return url, headers, openai_body
+    body = dict(openai_body)
+    # Keep cache prefix warm for 24h instead of the default 5–10min in_memory window.
+    # Newer gpt-5* models default to 24h anyway; explicit is harmless and covers gpt-5.4.
+    body.setdefault("prompt_cache_retention", "24h")
+    return url, headers, body
 
 
 async def _collect_stream_to_json(
