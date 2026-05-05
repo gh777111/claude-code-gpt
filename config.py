@@ -74,6 +74,12 @@ WEB_FETCH_MAX_CHAIN = int(os.environ.get("CLAUDEGPT_WEB_FETCH_MAX_CHAIN", "4"))
 WEB_FETCH_TIMEOUT = int(os.environ.get("CLAUDEGPT_WEB_FETCH_TIMEOUT", "15"))
 WEB_FETCH_MAX_CHARS = int(os.environ.get("CLAUDEGPT_WEB_FETCH_MAX_CHARS", "50000"))
 
+# Run a small-model first-stage to summarize/extract from the fetched page based
+# on the model's `prompt` argument — mirrors Anthropic's WebFetch architecture.
+# Empty value disables (raw text passes through to the main model unmodified).
+WEB_FETCH_SUMMARIZER = os.environ.get("CLAUDEGPT_WEB_FETCH_SUMMARIZER", DEPLOYMENT_HAIKU)
+WEB_FETCH_SUMMARY_MAX_CHARS = int(os.environ.get("CLAUDEGPT_WEB_FETCH_SUMMARY_MAX_CHARS", "4000"))
+
 
 def map_model(claude_model: str) -> str:
     m = (claude_model or "").lower()
