@@ -1,6 +1,8 @@
 import json
 import uuid
 
+import config
+
 
 def _system_to_text(system) -> str:
     if not system:
@@ -126,6 +128,8 @@ def anthropic_to_responses(req: dict, deployment: str, reasoning_effort: str | N
 
     tools = req.get("tools")
     if tools:
+        if config.BLOCK_MCP:
+            tools = [t for t in tools if not (t.get("name") or "").startswith("mcp__")]
         body["tools"] = [
             {
                 "type": "function",

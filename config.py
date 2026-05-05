@@ -48,6 +48,12 @@ REASONING_HAIKU = os.environ.get("CLAUDEGPT_REASONING_HAIKU", "medium")
 TOOLS_REASONING = os.environ.get("CLAUDEGPT_TOOLS_REASONING", "low")
 TOOLS_DEPLOYMENT = os.environ.get("CLAUDEGPT_TOOLS_DEPLOYMENT", "")
 
+# Strip `mcp__*` tool declarations from the request before forwarding to the backend.
+# Saves ~30K chars per turn when MCP servers are loaded but not actually used by the model.
+# Side effect: model can no longer call any MCP tool. Use case: keep ~/.claude settings
+# (CLAUDE.md, commands, permissions) but skip the MCP overhead.
+BLOCK_MCP = os.environ.get("CLAUDEGPT_BLOCK_MCP", "").strip().lower() not in ("", "0", "false", "no", "off")
+
 
 def map_model(claude_model: str) -> str:
     m = (claude_model or "").lower()
