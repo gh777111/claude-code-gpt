@@ -1,19 +1,33 @@
 """Per-turn request/response trace.
 
-Off by default. Enable with `CLAUDEGPT_TRACE=1`.
-Output: <repo>/traces/<ts>-<id>.json (or CLAUDEGPT_TRACE_DIR override).
-One self-contained JSON file per turn — inspect with `jq` or any editor.
+Default ON (set CLAUDEGPT_TRACE=0 to disable).
+Output: <repo>/traces/<cwd-tag>/<ts>-<id>.json — one file per turn, grouped
+by the directory claudegpt was launched from (CLAUDEGPT_CWD env, set by the
+launcher). Mirrors how Claude Code keeps sessions per project root.
+Override base dir with CLAUDEGPT_TRACE_DIR.
 """
 import json
 import os
+import re
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-ENABLED = os.environ.get("CLAUDEGPT_TRACE", "").strip().lower() not in ("", "0", "false", "no", "off")
+# default ON; explicit off via CLAUDEGPT_TRACE=0|false|no|off
+ENABLED = os.environ.get("CLAUDEGPT_TRACE", "1").strip().lower() not in ("0", "false", "no", "off")
 _DEFAULT_DIR = Path(__file__).parent / "traces"
-DIR = Path(os.environ.get("CLAUDEGPT_TRACE_DIR") or _DEFAULT_DIR)
+BASE_DIR = Path(os.environ.get("CLAUDEGPT_TRACE_DIR") or _DEFAULT_DIR)
+
+
+def _cwd_tag() -> str:
+    """Stable, filesystem-safe label derived from the launching cwd."""
+    raw = os.environ.get("CLAUDEGPT_CWD") or os.getcwd()
+    # last two path components, slugified — keeps it human-readable + unique enough
+    parts = [p for p in raw.split(os.sep) if p][-2:]
+    slug = "-".join(parts) or "root"
+    slug = re.sub(r"[^A-Za-z0-9._-]", "_", slug)
+    return slug[:64] or "root"
 
 
 class Trace:
@@ -28,6 +42,7 @@ class Trace:
         self.data: dict = {
             "id": self.id,
             "ts_start": self._ts_start.isoformat(),
+            "cwd": os.environ.get("CLAUDEGPT_CWD") or os.getcwd(),
         }
 
     def set(self, **kw) -> None:
@@ -51,9 +66,11 @@ class Trace:
         self.data["duration_ms"] = round((time.monotonic() - self._t0) * 1000)
         self.data.setdefault("ts_end", datetime.now(timezone.utc).isoformat())
         try:
-            DIR.mkdir(parents=True, exist_ok=True)
+            out_dir = BASE_DIR / _cwd_tag()
+            out_dir.mkdir(parents=True, exist_ok=True)
             ts = self._ts_start.strftime("%Y%m%dT%H%M%S")
-            path = DIR / f"{ts}-{self.id}.json"
-            path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2, default=str))
+            (out_dir / f"{ts}-{self.id}.json").write_text(
+                json.dumps(self.data, ensure_ascii=False, indent=2, default=str)
+            )
         except OSError:
             pass  # never break the proxy on trace failures

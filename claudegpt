@@ -26,6 +26,45 @@ if [[ -z "$UV_BIN" ]]; then
   fi
 fi
 
+# Pass cwd through to the proxy so traces can be grouped per project.
+export CLAUDEGPT_CWD="$(pwd)"
+
+# Capture --effort flag from claude args and translate into proxy reasoning envs.
+# Claude Code does NOT forward `thinking` to non-Anthropic backends, so we apply
+# the effort here instead.  Mapping: low/medium/high passthrough; xhigh/max → high.
+EFFORT_FLAG=""
+prev_arg=""
+for a in "$@"; do
+  if [[ "$prev_arg" == "--effort" ]]; then
+    EFFORT_FLAG="$a"; break
+  elif [[ "$a" == --effort=* ]]; then
+    EFFORT_FLAG="${a#--effort=}"; break
+  fi
+  prev_arg="$a"
+done
+if [[ -n "$EFFORT_FLAG" ]]; then
+  case "$EFFORT_FLAG" in
+    low|medium|high) eff="$EFFORT_FLAG" ;;
+    xhigh|max)       eff="high" ;;
+    *) eff="" ;;
+  esac
+  if [[ -n "$eff" ]]; then
+    export CLAUDEGPT_TOOLS_REASONING="$eff"
+    export CLAUDEGPT_REASONING_OPUS="$eff"
+    export CLAUDEGPT_REASONING_SONNET="$eff"
+    export CLAUDEGPT_REASONING_HAIKU="$eff"
+    EFFORT_TAG_FILE="${TMPDIR:-/tmp}/claudegpt-${PORT}.effort"
+    if [[ -f "$PIDFILE" ]] && [[ "$(cat "$EFFORT_TAG_FILE" 2>/dev/null || echo)" != "$eff" ]]; then
+      # running proxy was started with a different effort — restart so envs apply
+      old_pid="$(cat "$PIDFILE" 2>/dev/null || true)"
+      [[ -n "${old_pid:-}" ]] && kill "$old_pid" 2>/dev/null || true
+      rm -f "$PIDFILE"
+      sleep 0.3
+    fi
+    echo "$eff" > "$EFFORT_TAG_FILE"
+  fi
+fi
+
 started_here=0
 cleanup() {
   if [[ "$started_here" == "1" && -f "$PIDFILE" ]]; then
