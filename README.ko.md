@@ -31,18 +31,16 @@ Anthropic Opus를 같은 작업에 직접 사용하면 수 배 더 비쌌을 것
 ```bash
 git clone https://github.com/gh777111/claude-code-gpt
 cd claude-code-gpt
-cp .env.example .env
-# .env에 provider 선택 + 자격증명 입력
-# Azure는 .env의 deployment 이름이 본인 Azure 리소스에 미리 존재해야 합니다.
-
 uv sync                       # fastapi/uvicorn/httpx/python-dotenv 설치
 
 mkdir -p ~/.local/bin
 ln -sf "$PWD/claudegpt" ~/.local/bin/claudegpt
-# ~/.local/bin 이 PATH에 들어있어야 합니다.
+# ~/.local/bin 이 PATH에 있어야 합니다.
 
-claudegpt                     # 프록시 자동 기동 + Claude Code 실행
+claudegpt                     # 첫 실행 시 setup 마법사가 뜹니다
 ```
+
+마법사가 백엔드(Azure / OpenAI / Codex)를 묻고 `.env`를 자동 생성합니다. Codex를 고르면 `codex login`을 직접 호출 — API 키 복사/붙여넣기 필요 없음. 그 이후 모든 `claudegpt` 호출은 프록시를 띄우고 Claude Code를 실행합니다.
 
 요구사항:
 

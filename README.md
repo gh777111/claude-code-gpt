@@ -31,18 +31,16 @@ Anthropic Opus on the same task would have been several times more expensive. We
 ```bash
 git clone https://github.com/gh777111/claude-code-gpt
 cd claude-code-gpt
-cp .env.example .env
-# Edit .env: pick a provider and fill in credentials.
-# For Azure, the deployment names you set must already exist in your Azure resource.
-
 uv sync                       # installs fastapi/uvicorn/httpx/python-dotenv
 
 mkdir -p ~/.local/bin
 ln -sf "$PWD/claudegpt" ~/.local/bin/claudegpt
 # make sure ~/.local/bin is on your PATH
 
-claudegpt                     # boots the proxy + launches Claude Code
+claudegpt                     # first run launches a setup wizard
 ```
+
+The wizard asks which backend to use (Azure / OpenAI / Codex) and writes a `.env` for you. For Codex it just shells out to `codex login` — no API key to copy/paste. After that, every `claudegpt` invocation boots the proxy and execs Claude Code.
 
 Requirements:
 

@@ -32,6 +32,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+if [[ ! -f "$ROOT/.env" && ! -f "$HOME/.claude/.env" ]]; then
+  echo "[claudegpt] no .env yet — running first-run setup" >&2
+  ( cd "$ROOT" && python3 setup.py ) || exit 1
+fi
+
 if curl -fsS "http://${HOST}:${PORT}/healthz" >/dev/null 2>&1; then
   :
 else
