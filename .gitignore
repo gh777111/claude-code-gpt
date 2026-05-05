@@ -8,6 +8,7 @@ __pycache__/
 .env
 .claude/
 .measure.sh
+traces/
 
 # Demo / scratch artifacts
 gpt55_tool_test_icon.png

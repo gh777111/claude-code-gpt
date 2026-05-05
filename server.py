@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import config
 from translate import anthropic_to_responses, responses_to_anthropic
 from stream import responses_stream_to_anthropic
+from trace import Trace
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("claudegpt")
@@ -82,15 +83,19 @@ async def _collect_stream_to_json(
     headers: dict,
     body: dict,
     model: str,
+    trace: Trace | None = None,
 ) -> JSONResponse:
     """Stream from backend, aggregate into a Responses-shaped dict, then
     apply responses_to_anthropic. Used when backend requires stream=true
     but the client requested stream=false."""
+    captured: list[dict] = []
     try:
         async with client.stream("POST", url, headers=headers, json=body) as r:
             if r.status_code >= 400:
                 err = await r.aread()
                 log.warning("Backend collect error %s: %s", r.status_code, err[:500])
+                if trace is not None:
+                    trace.set(backend_status=r.status_code, error=err.decode("utf-8", "replace")[:2000])
                 return JSONResponse(
                     status_code=r.status_code,
                     content={"type": "error",
@@ -109,6 +114,8 @@ async def _collect_stream_to_json(
                     evt = json.loads(data)
                 except json.JSONDecodeError:
                     continue
+                if trace is not None and trace.enabled:
+                    captured.append(evt)
                 et = evt.get("type") or ""
                 if et == "response.created":
                     response_meta = evt.get("response") or {}
@@ -120,8 +127,13 @@ async def _collect_stream_to_json(
             response_meta["output"] = [
                 items_by_idx[k] for k in sorted(items_by_idx)
             ]
-            return JSONResponse(content=responses_to_anthropic(response_meta, model))
+            resp_anthropic = responses_to_anthropic(response_meta, model)
+            if trace is not None:
+                trace.set(response_openai=response_meta, response_openai_events=captured, response_anthropic=resp_anthropic)
+            return JSONResponse(content=resp_anthropic)
     except httpx.HTTPError as e:
+        if trace is not None:
+            trace.set(error=str(e))
         return JSONResponse(
             status_code=502,
             content={"type": "error", "error": {"type": "api_error", "message": str(e)}},
@@ -189,6 +201,8 @@ async def count_tokens(req: Request):
 @app.post("/v1/messages")
 async def messages(req: Request):
     body = await req.json()
+    tr = Trace()
+    tr.set(request_anthropic=body)
     requested_model = body.get("model", "")
     deployment = config.map_model(requested_model)
     effort = config.map_reasoning_effort(requested_model)
@@ -216,38 +230,65 @@ async def messages(req: Request):
         client_wants_stream, backend_stream,
         len(send_body.get("input", [])), effort,
     )
+    tr.set(
+        provider=config.PROVIDER,
+        requested_model=requested_model,
+        deployment=deployment,
+        effort=effort,
+        client_stream=client_wants_stream,
+        backend_stream=backend_stream,
+        request_openai=send_body,
+    )
 
     client = _client
     assert client is not None
 
     # Backend forces stream but client wants non-stream: collect SSE → JSON
     if backend_stream and not client_wants_stream:
-        return await _collect_stream_to_json(
-            client, url, headers, send_body, requested_model
+        tr.backend_start()
+        resp = await _collect_stream_to_json(
+            client, url, headers, send_body, requested_model, trace=tr
         )
+        tr.backend_end()
+        tr.save()
+        return resp
 
     if not backend_stream:
+        tr.backend_start()
         try:
             r = await client.post(url, headers=headers, json=send_body)
         except httpx.HTTPError as e:
+            tr.set(error=str(e))
+            tr.save()
             return JSONResponse(
                 status_code=502,
                 content={"type": "error", "error": {"type": "api_error", "message": str(e)}},
             )
+        tr.backend_end()
         if r.status_code >= 400:
             log.warning("Backend error %s: %s", r.status_code, r.text[:500])
+            tr.set(backend_status=r.status_code, error=r.text[:2000])
+            tr.save()
             return JSONResponse(
                 status_code=r.status_code,
                 content={"type": "error", "error": {"type": "api_error", "message": r.text[:2000]}},
             )
-        return JSONResponse(content=responses_to_anthropic(r.json(), requested_model))
+        resp_openai = r.json()
+        resp_anthropic = responses_to_anthropic(resp_openai, requested_model)
+        tr.set(response_openai=resp_openai, response_anthropic=resp_anthropic)
+        tr.save()
+        return JSONResponse(content=resp_anthropic)
 
     async def stream_gen() -> AsyncIterator[bytes]:
+        captured: list[dict] = []
+        tr.backend_start()
         try:
             async with client.stream("POST", url, headers=headers, json=send_body) as r:
                 if r.status_code >= 400:
                     err = await r.aread()
                     log.warning("Backend stream error %s: %s", r.status_code, err[:500])
+                    tr.set(backend_status=r.status_code, error=err.decode("utf-8", "replace")[:2000])
+                    tr.save()
                     payload = {
                         "type": "error",
                         "error": {
@@ -269,15 +310,24 @@ async def messages(req: Request):
                         if data == "[DONE]":
                             return
                         try:
-                            yield json.loads(data)
+                            evt = json.loads(data)
                         except json.JSONDecodeError:
                             continue
+                        if tr.enabled:
+                            captured.append(evt)
+                        yield evt
 
                 async for sse in responses_stream_to_anthropic(parsed(), requested_model):
                     yield sse
         except httpx.HTTPError as e:
+            tr.set(error=str(e))
             payload = {"type": "error", "error": {"type": "api_error", "message": str(e)}}
             yield f"event: error\ndata: {json.dumps(payload)}\n\n".encode()
+        finally:
+            tr.backend_end()
+            if tr.enabled:
+                tr.set(response_openai_events=captured)
+            tr.save()
 
     return StreamingResponse(stream_gen(), media_type="text/event-stream")
 
