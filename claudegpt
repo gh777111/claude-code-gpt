@@ -3,7 +3,13 @@
 # (provider chosen via CLAUDEGPT_PROVIDER: azure | openai | codex)
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 HOST="${CLAUDEGPT_HOST:-127.0.0.1}"
 PORT="${CLAUDEGPT_PORT:-3210}"
 PIDFILE="${TMPDIR:-/tmp}/claudegpt-${PORT}.pid"
