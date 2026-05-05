@@ -56,7 +56,7 @@ BLOCK_MCP = os.environ.get("CLAUDEGPT_BLOCK_MCP", "").strip().lower() not in (""
 
 # Comma-separated tool names to drop from the request.  Per-turn savings vary;
 # safe defaults below cover tools the user has confirmed unused on this setup.
-_DROP_DEFAULT = "NotebookEdit,WebFetch"
+_DROP_DEFAULT = "NotebookEdit"
 DROP_TOOLS = {
     n.strip()
     for n in os.environ.get("CLAUDEGPT_DROP_TOOLS", _DROP_DEFAULT).split(",")
@@ -66,6 +66,13 @@ DROP_TOOLS = {
 # Replace Anthropic-side WebSearch tool with Azure's hosted {"type":"web_search"}
 # so the model can actually search.  Only meaningful for provider=azure.
 MAP_WEB_SEARCH = os.environ.get("CLAUDEGPT_MAP_WEB_SEARCH", "1").strip().lower() not in ("0", "false", "no", "off")
+
+# Intercept Anthropic-side WebFetch tool calls in the proxy and run urllib locally,
+# emitting `web_fetch_tool_result` content blocks that match Anthropic's native format.
+MAP_WEB_FETCH = os.environ.get("CLAUDEGPT_MAP_WEB_FETCH", "1").strip().lower() not in ("0", "false", "no", "off")
+WEB_FETCH_MAX_CHAIN = int(os.environ.get("CLAUDEGPT_WEB_FETCH_MAX_CHAIN", "4"))
+WEB_FETCH_TIMEOUT = int(os.environ.get("CLAUDEGPT_WEB_FETCH_TIMEOUT", "15"))
+WEB_FETCH_MAX_CHARS = int(os.environ.get("CLAUDEGPT_WEB_FETCH_MAX_CHARS", "50000"))
 
 
 def map_model(claude_model: str) -> str:

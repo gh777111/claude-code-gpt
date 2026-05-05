@@ -12,6 +12,7 @@ import config
 from translate import anthropic_to_responses, responses_to_anthropic
 from stream import responses_stream_to_anthropic
 from trace import Trace
+from chain import stream_with_webfetch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("claudegpt")
@@ -283,16 +284,31 @@ async def messages(req: Request):
         tr.save()
         return JSONResponse(content=resp_anthropic)
 
+    # Pick stream driver: chain controller when WebFetch is in tools (intercepts
+    # function_calls, runs urllib locally, follows up); otherwise the simple
+    # passthrough translator.
+    has_web_fetch = any(
+        (t.get("type") == "function" and t.get("name") == "WebFetch")
+        for t in (send_body.get("tools") or [])
+    )
+    use_chain = has_web_fetch and config.MAP_WEB_FETCH and config.PROVIDER == "azure"
+
     async def stream_gen() -> AsyncIterator[bytes]:
-        captured: list[dict] = []
         tr.backend_start()
         try:
+            if use_chain:
+                async for chunk in stream_with_webfetch(
+                    client, url, headers, send_body, requested_model
+                ):
+                    yield chunk
+                return
+
+            captured: list[dict] = []
             async with client.stream("POST", url, headers=headers, json=send_body) as r:
                 if r.status_code >= 400:
                     err = await r.aread()
                     log.warning("Backend stream error %s: %s", r.status_code, err[:500])
                     tr.set(backend_status=r.status_code, error=err.decode("utf-8", "replace")[:2000])
-                    tr.save()
                     payload = {
                         "type": "error",
                         "error": {
@@ -323,14 +339,14 @@ async def messages(req: Request):
 
                 async for sse in responses_stream_to_anthropic(parsed(), requested_model):
                     yield sse
+            if tr.enabled:
+                tr.set(response_openai_events=captured)
         except httpx.HTTPError as e:
             tr.set(error=str(e))
             payload = {"type": "error", "error": {"type": "api_error", "message": str(e)}}
             yield f"event: error\ndata: {json.dumps(payload)}\n\n".encode()
         finally:
             tr.backend_end()
-            if tr.enabled:
-                tr.set(response_openai_events=captured)
             tr.save()
 
     return StreamingResponse(stream_gen(), media_type="text/event-stream")
