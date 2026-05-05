@@ -137,10 +137,21 @@ def anthropic_to_responses(req: dict, deployment: str, reasoning_effort: str | N
             if name == "WebSearch" and config.MAP_WEB_SEARCH and config.PROVIDER == "azure":
                 converted.append({"type": "web_search"})
                 continue
+            desc = t.get("description", "") or ""
+            # Nudge the model away from delegating WebFetch through the Agent tool
+            # (which spawns a subagent + tries to create a worktree).
+            if name == "WebFetch" and config.MAP_WEB_FETCH:
+                desc = (
+                    "Use this tool directly to fetch a specific URL. "
+                    "Do NOT delegate to the Agent tool for single-URL fetching — "
+                    "Agent is for open-ended research, not for known URLs. "
+                    "When the user gives you a URL to fetch or summarize, call WebFetch immediately.\n\n"
+                    + desc
+                )
             converted.append({
                 "type": "function",
                 "name": name,
-                "description": t.get("description", ""),
+                "description": desc,
                 "parameters": t.get("input_schema") or {"type": "object", "properties": {}},
             })
         body["tools"] = converted
