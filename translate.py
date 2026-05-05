@@ -128,6 +128,8 @@ def anthropic_to_responses(req: dict, deployment: str, reasoning_effort: str | N
     if tools:
         if config.BLOCK_MCP:
             tools = [t for t in tools if not (t.get("name") or "").startswith("mcp__")]
+        if config.DROP_TOOLS:
+            tools = [t for t in tools if (t.get("name") or "") not in config.DROP_TOOLS]
         body["tools"] = [
             {
                 "type": "function",

@@ -54,6 +54,15 @@ TOOLS_DEPLOYMENT = os.environ.get("CLAUDEGPT_TOOLS_DEPLOYMENT", "")
 # (CLAUDE.md, commands, permissions) but skip the MCP overhead.
 BLOCK_MCP = os.environ.get("CLAUDEGPT_BLOCK_MCP", "").strip().lower() not in ("", "0", "false", "no", "off")
 
+# Comma-separated tool names to drop from the request.  Per-turn savings vary;
+# safe defaults below cover tools the user has confirmed unused on this setup.
+_DROP_DEFAULT = "NotebookEdit,TaskOutput,WebSearch,WebFetch,EnterWorktree,ExitWorktree,ScheduleWakeup"
+DROP_TOOLS = {
+    n.strip()
+    for n in os.environ.get("CLAUDEGPT_DROP_TOOLS", _DROP_DEFAULT).split(",")
+    if n.strip()
+}
+
 
 def map_model(claude_model: str) -> str:
     m = (claude_model or "").lower()
