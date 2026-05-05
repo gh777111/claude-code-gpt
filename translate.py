@@ -130,15 +130,20 @@ def anthropic_to_responses(req: dict, deployment: str, reasoning_effort: str | N
             tools = [t for t in tools if not (t.get("name") or "").startswith("mcp__")]
         if config.DROP_TOOLS:
             tools = [t for t in tools if (t.get("name") or "") not in config.DROP_TOOLS]
-        body["tools"] = [
-            {
+        converted: list[dict] = []
+        for t in tools:
+            name = t.get("name") or ""
+            # Anthropic WebSearch → Azure hosted web_search tool (real search, server-side)
+            if name == "WebSearch" and config.MAP_WEB_SEARCH and config.PROVIDER == "azure":
+                converted.append({"type": "web_search"})
+                continue
+            converted.append({
                 "type": "function",
-                "name": t.get("name"),
+                "name": name,
                 "description": t.get("description", ""),
                 "parameters": t.get("input_schema") or {"type": "object", "properties": {}},
-            }
-            for t in tools
-        ]
+            })
+        body["tools"] = converted
         tc = req.get("tool_choice")
         if tc:
             ct = tc.get("type")
