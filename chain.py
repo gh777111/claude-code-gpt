@@ -39,6 +39,7 @@ async def _drive_round(
     body: dict,
     cursor: dict,
     pending_fetches: list,
+    captured_events: list | None = None,
 ) -> AsyncIterator[bytes]:
     """One Azure call: stream events → Anthropic SSE deltas. WebFetch
     function_calls are emitted as server_tool_use blocks AND queued in
@@ -73,6 +74,8 @@ async def _drive_round(
                     evt = json.loads(data)
                 except json.JSONDecodeError:
                     continue
+                if captured_events is not None:
+                    captured_events.append(evt)
 
                 et = evt.get("type") or ""
 
@@ -221,6 +224,8 @@ async def stream_with_webfetch(
     headers: dict,
     body: dict,
     requested_model: str,
+    *,
+    trace=None,
 ) -> AsyncIterator[bytes]:
     """Multi-round streaming controller. Drives Azure once; if the model emits
     a WebFetch function_call, runs urllib + sends a follow-up Azure call with
@@ -249,13 +254,21 @@ async def stream_with_webfetch(
     })
 
     current_body = body
+    rounds_log: list[dict] = []  # one entry per Azure call, captured for the trace
+    captured_events: list[dict] | None = [] if (trace is not None and getattr(trace, "enabled", False)) else None
     rounds = 0
     while rounds < config.WEB_FETCH_MAX_CHAIN:
         rounds += 1
         pending: list[dict] = []
+        round_events: list[dict] = []
         async for chunk in _drive_round(client, url, headers, current_body,
-                                        cursor, pending):
+                                        cursor, pending,
+                                        round_events if captured_events is not None else None):
             yield chunk
+        if captured_events is not None:
+            captured_events.extend(round_events)
+            rounds_log.append({"round": rounds, "events": len(round_events),
+                               "pending_fetches": len(pending)})
         if cursor["fatal"]:
             break
         if not pending:
@@ -289,6 +302,15 @@ async def stream_with_webfetch(
                 "type": "content_block_stop", "index": anth_idx,
             })
             fc["fetch_result"] = result
+            if captured_events is not None:
+                rounds_log[-1].setdefault("fetches", []).append({
+                    "url": target_url,
+                    "ok": result.get("ok"),
+                    "title": result.get("title"),
+                    "text_len": len(result.get("text", "")),
+                    "error_code": result.get("error_code"),
+                    "error_message": result.get("error_message"),
+                })
 
         # Build follow-up Azure body — append function_call + function_call_output
         # items to input. Original input order preserved.
@@ -313,3 +335,9 @@ async def stream_with_webfetch(
         "usage": {"output_tokens": cursor["output_tokens"]},
     })
     yield _sse("message_stop", {"type": "message_stop"})
+
+    if trace is not None and getattr(trace, "enabled", False):
+        trace.set(
+            chain_rounds=rounds_log,
+            response_openai_events=captured_events or [],
+        )

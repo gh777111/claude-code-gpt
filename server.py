@@ -298,7 +298,7 @@ async def messages(req: Request):
         try:
             if use_chain:
                 async for chunk in stream_with_webfetch(
-                    client, url, headers, send_body, requested_model
+                    client, url, headers, send_body, requested_model, trace=tr
                 ):
                     yield chunk
                 return
