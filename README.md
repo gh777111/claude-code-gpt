@@ -10,6 +10,8 @@ A tiny FastAPI proxy that translates Anthropic's Messages API into the OpenAI **
   <img src="docs/img/architecture-ko.png" alt="claude-code-gpt 아키텍처" width="520">
 </p>
 
+> 🇰🇷 **한국어 사용자 안내** · Claude Code의 UX는 그대로, 백엔드만 GPT-5.5로 바꾸는 가벼운 프록시입니다. Azure OpenAI · OpenAI · Codex(ChatGPT 구독) 중 선택해 사용할 수 있고, 첫 실행 시 셋업 마법사가 자격증명을 안내합니다. 자세한 한국어 문서는 [README.ko.md](README.ko.md)를 보세요.
+
 ```
 Claude Code  ──►  claude-code-gpt  ──►  Azure / OpenAI / Codex
    (UX)            (this repo)          (cheaper compute)
