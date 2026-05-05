@@ -1,10 +1,14 @@
 # claude-code-gpt
 
-> Run [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) with **GPT‑5** as the backend — through Azure OpenAI, OpenAI direct, or your existing Codex CLI session.
+> Run [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) with **GPT-5.5** as the backend — through Azure OpenAI, OpenAI direct, or your existing Codex CLI session.
 >
 > [한국어 README](README.ko.md)
 
-A tiny FastAPI proxy that translates Anthropic's Messages API into the OpenAI **Responses API**. Point Claude Code's `ANTHROPIC_BASE_URL` at it and the entire CLI keeps working — same UX, same tools, same sub‑agents — just running on GPT‑5 instead of Claude.
+A tiny FastAPI proxy that translates Anthropic's Messages API into the OpenAI **Responses API**. Point Claude Code's `ANTHROPIC_BASE_URL` at it and the entire CLI keeps working — same UX, same tools, same sub‑agents — just running on GPT-5.5 instead of Claude.
+
+<p align="center">
+  <img src="docs/img/architecture-ko.png" alt="claude-code-gpt 아키텍처" width="520">
+</p>
 
 ```
 Claude Code  ──►  claude-code-gpt  ──►  Azure / OpenAI / Codex

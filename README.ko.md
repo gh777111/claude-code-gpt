@@ -1,6 +1,10 @@
 # claude-code-gpt
 
-> [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)를 **GPT‑5** 백엔드로 실행하는 가벼운 프록시 — Azure OpenAI, OpenAI 직접, 또는 기존 Codex CLI 세션을 통해.
+> [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)를 **GPT-5.5** 백엔드로 실행하는 가벼운 프록시 — Azure OpenAI, OpenAI 직접, 또는 기존 Codex CLI 세션을 통해.
+
+<p align="center">
+  <img src="docs/img/architecture-ko.png" alt="claude-code-gpt 아키텍처" width="520">
+</p>
 >
 > [English README](README.md)
 
