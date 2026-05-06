@@ -38,7 +38,8 @@ app = FastAPI(lifespan=lifespan, title="claudegpt")
 # Claude Code embeds the user's actual cwd in the system prompt under
 # "Primary working directory: <path>".  The proxy daemon is shared across
 # sessions, so this per-request value is the only reliable cwd source.
-_CWD_RE = re.compile(r"Primary working directory:\s*(\S+)")
+# Use [^\n]+ (not \S+) so paths-with-spaces survive.
+_CWD_RE = re.compile(r"Primary working directory:\s*([^\n]+?)\s*$", re.MULTILINE)
 
 
 def _extract_cwd(req_body: dict) -> str | None:
@@ -128,7 +129,9 @@ async def _collect_stream_to_json(
                 )
             response_meta: dict = {}
             items_by_idx: dict[int, dict] = {}
-            async for line in r.aiter_lines():
+            async for line in aiter_lines_with_timeout(
+                r, config.STREAM_FIRST_EVENT_TIMEOUT, config.STREAM_IDLE_TIMEOUT,
+            ):
                 if not line.startswith("data:"):
                     continue
                 data = line[5:].lstrip()
@@ -161,6 +164,18 @@ async def _collect_stream_to_json(
         return JSONResponse(
             status_code=502,
             content={"type": "error", "error": {"type": "api_error", "message": str(e)}},
+        )
+    except asyncio.TimeoutError:
+        msg = (
+            f"backend stream stalled (no events within "
+            f"{config.STREAM_FIRST_EVENT_TIMEOUT}s of open / "
+            f"{config.STREAM_IDLE_TIMEOUT}s gap)."
+        )
+        if trace is not None:
+            trace.set(error=msg)
+        return JSONResponse(
+            status_code=504,
+            content={"type": "error", "error": {"type": "api_error", "message": msg}},
         )
 
 
