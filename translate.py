@@ -172,9 +172,13 @@ def anthropic_to_responses(req: dict, deployment: str, reasoning_effort: str | N
         converted: list[dict] = []
         for t in tools:
             name = t.get("name") or ""
-            # Anthropic WebSearch → Azure hosted web_search tool (real search, server-side)
+            # Anthropic WebSearch → Azure hosted web_search tool (real search, server-side).
+            # Some deployments (gpt-5.4-nano) return an empty 200 stream when given
+            # the hosted tool — gate via deployment_supports_web_search.
             if name == "WebSearch" and config.MAP_WEB_SEARCH and config.PROVIDER == "azure":
-                converted.append({"type": "web_search"})
+                if config.deployment_supports_web_search(deployment):
+                    converted.append({"type": "web_search"})
+                # else: drop entirely; model just won't have search this turn
                 continue
             desc = t.get("description", "") or ""
             # Nudge the model away from delegating WebFetch through the Agent tool

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -12,7 +13,7 @@ import config
 from translate import anthropic_to_responses, responses_to_anthropic
 from stream import responses_stream_to_anthropic
 from trace import Trace
-from chain import stream_with_webfetch
+from chain import stream_with_webfetch, aiter_lines_with_timeout
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("claudegpt")
@@ -323,7 +324,9 @@ async def messages(req: Request):
                     return
 
                 async def parsed():
-                    async for line in r.aiter_lines():
+                    async for line in aiter_lines_with_timeout(
+                        r, config.STREAM_FIRST_EVENT_TIMEOUT, config.STREAM_IDLE_TIMEOUT,
+                    ):
                         if not line:
                             continue
                         if line.startswith("data:"):
@@ -347,6 +350,16 @@ async def messages(req: Request):
         except httpx.HTTPError as e:
             tr.set(error=str(e))
             payload = {"type": "error", "error": {"type": "api_error", "message": str(e)}}
+            yield f"event: error\ndata: {json.dumps(payload)}\n\n".encode()
+        except asyncio.TimeoutError:
+            msg = (
+                f"backend stream stalled (no events within "
+                f"{config.STREAM_FIRST_EVENT_TIMEOUT}s of open / "
+                f"{config.STREAM_IDLE_TIMEOUT}s gap). "
+                "Likely deployment/tool incompatibility."
+            )
+            tr.set(error=msg)
+            payload = {"type": "error", "error": {"type": "api_error", "message": msg}}
             yield f"event: error\ndata: {json.dumps(payload)}\n\n".encode()
         finally:
             tr.backend_end()

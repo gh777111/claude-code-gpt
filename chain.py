@@ -21,6 +21,23 @@ def _sse(event: str, data: dict) -> bytes:
     return f"event: {event}\ndata: {payload}\n\n".encode("utf-8")
 
 
+async def aiter_lines_with_timeout(response, first_timeout: int, idle_timeout: int):
+    """Yield lines from `response.aiter_lines()` but raise asyncio.TimeoutError
+    if the first line takes longer than `first_timeout`, or any subsequent gap
+    exceeds `idle_timeout`.  Detects stalled SSE streams (Azure 200 OK + empty
+    body) which would otherwise hang forever."""
+    ait = response.aiter_lines().__aiter__()
+    first = True
+    while True:
+        timeout = first_timeout if first else idle_timeout
+        try:
+            line = await asyncio.wait_for(ait.__anext__(), timeout=timeout)
+        except StopAsyncIteration:
+            return
+        first = False
+        yield line
+
+
 def _clean_args(raw: str) -> str:
     try:
         parsed = json.loads(raw or "{}")
@@ -138,7 +155,9 @@ async def _drive_round(
                 cursor["fatal"] = True
                 return
 
-            async for line in r.aiter_lines():
+            async for line in aiter_lines_with_timeout(
+                r, config.STREAM_FIRST_EVENT_TIMEOUT, config.STREAM_IDLE_TIMEOUT,
+            ):
                 if not line.startswith("data:"):
                     continue
                 data = line[5:].lstrip()
@@ -292,6 +311,16 @@ async def _drive_round(
         payload = {"type": "error", "error": {
             "type": "api_error", "message": str(e),
         }}
+        yield f"event: error\ndata: {json.dumps(payload)}\n\n".encode()
+        cursor["fatal"] = True
+    except asyncio.TimeoutError:
+        msg = (
+            f"backend stream stalled (no events within "
+            f"{config.STREAM_FIRST_EVENT_TIMEOUT}s of open / "
+            f"{config.STREAM_IDLE_TIMEOUT}s gap). "
+            "Likely deployment/tool incompatibility."
+        )
+        payload = {"type": "error", "error": {"type": "api_error", "message": msg}}
         yield f"event: error\ndata: {json.dumps(payload)}\n\n".encode()
         cursor["fatal"] = True
 

@@ -66,6 +66,26 @@ DROP_TOOLS = {
 # Replace Anthropic-side WebSearch tool with Azure's hosted {"type":"web_search"}
 # so the model can actually search.  Only meaningful for provider=azure.
 MAP_WEB_SEARCH = os.environ.get("CLAUDEGPT_MAP_WEB_SEARCH", "1").strip().lower() not in ("0", "false", "no", "off")
+# Comma-separated substrings; if any matches the deployment name, hosted
+# web_search is NOT injected for that deployment.  gpt-5.4-nano returns an
+# empty 200 stream when given hosted web_search — known incompat.
+NO_WEB_SEARCH_DEPLOYMENTS = {
+    s.strip().lower()
+    for s in os.environ.get("CLAUDEGPT_NO_WEB_SEARCH", "nano").split(",")
+    if s.strip()
+}
+
+
+def deployment_supports_web_search(deployment: str) -> bool:
+    d = (deployment or "").lower()
+    return not any(s in d for s in NO_WEB_SEARCH_DEPLOYMENTS)
+
+
+# --- Stream stall protection ---
+# Some Azure deployments accept a request (200 OK) but emit zero SSE events
+# (or stop emitting mid-stream).  Without timeouts the proxy hangs forever.
+STREAM_FIRST_EVENT_TIMEOUT = int(os.environ.get("CLAUDEGPT_STREAM_FIRST_EVENT_TIMEOUT", "90"))
+STREAM_IDLE_TIMEOUT = int(os.environ.get("CLAUDEGPT_STREAM_IDLE_TIMEOUT", "120"))
 
 # Intercept Anthropic-side WebFetch tool calls in the proxy and run urllib locally,
 # emitting `web_fetch_tool_result` content blocks that match Anthropic's native format.
