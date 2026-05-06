@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -33,6 +34,23 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, title="claudegpt")
+
+# Claude Code embeds the user's actual cwd in the system prompt under
+# "Primary working directory: <path>".  The proxy daemon is shared across
+# sessions, so this per-request value is the only reliable cwd source.
+_CWD_RE = re.compile(r"Primary working directory:\s*(\S+)")
+
+
+def _extract_cwd(req_body: dict) -> str | None:
+    sys = req_body.get("system")
+    if isinstance(sys, str):
+        text = sys
+    elif isinstance(sys, list):
+        text = "\n".join(b.get("text", "") for b in sys if b.get("type") == "text")
+    else:
+        return None
+    m = _CWD_RE.search(text)
+    return m.group(1) if m else None
 
 
 def _read_codex_auth() -> tuple[str, str]:
@@ -211,6 +229,8 @@ async def count_tokens(req: Request):
 async def messages(req: Request):
     body = await req.json()
     tr = Trace()
+    if (cwd := _extract_cwd(body)):
+        tr.set_cwd(cwd)
     tr.set(request_anthropic=body)
     requested_model = body.get("model", "")
     deployment = config.map_model(requested_model)

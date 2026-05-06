@@ -153,6 +153,12 @@ CLAUDEGPT_GLOBAL_ISOLATE="${CLAUDEGPT_GLOBAL_ISOLATE:-1}"
 if [[ "$CLAUDEGPT_GLOBAL_ISOLATE" == "1" ]]; then
   CLEAN_CONFIG="${CLAUDEGPT_CLEAN_CONFIG_DIR:-/tmp/claudegpt-clean-config}"
   mkdir -p "$CLEAN_CONFIG"
+  # Preserve user's global CLAUDE.md (Korean response, uv, python 3.12, git rules)
+  # into the isolated config dir.  Tiny (~125 tokens), keeps user's invariant rules
+  # while still blocking the heavy ~/.claude/{agents,skills,plugins,mcp} bundle.
+  if [[ -f "$HOME/.claude/CLAUDE.md" ]]; then
+    cp "$HOME/.claude/CLAUDE.md" "$CLEAN_CONFIG/CLAUDE.md"
+  fi
   # Patch settings.json: ensure model = $DEFAULT_TIER and a base permission allowlist.
   # Idempotent — preserves any user customizations to the file.
   CLEAN_CONFIG="$CLEAN_CONFIG" DEFAULT_TIER="$DEFAULT_TIER" python3 - <<'PY'
