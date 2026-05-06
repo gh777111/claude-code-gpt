@@ -1,7 +1,42 @@
 import json
+import re
 import uuid
 
 import config
+
+
+_BILLING_HEADER_RE = re.compile(r"^x-anthropic-billing-header:.*\n?", re.MULTILINE)
+_IDENTITY_START_MARK = "You are powered by the model named"
+_IDENTITY_END_MARK = "Fast mode for Claude Code uses Claude"
+
+
+def _sanitize_for_gpt(text: str, deployment: str, cutoff: str) -> str:
+    """Strip the Anthropic billing header and replace the 5-line model
+    identity block (which falsely asserts Claude Opus 4.7) with a truthful
+    GPT-side description."""
+    if not text:
+        return text
+    text = _BILLING_HEADER_RE.sub("", text)
+
+    lines = text.split("\n")
+    start = end = None
+    for i, line in enumerate(lines):
+        if start is None and _IDENTITY_START_MARK in line:
+            start = i
+        elif start is not None and _IDENTITY_END_MARK in line:
+            end = i
+            break
+    if start is not None and end is not None:
+        repl = [
+            f" - You are running on `{deployment}` (OpenAI GPT family) via the claudegpt proxy.",
+            " - When asked about your identity, do not claim to be Claude or any Anthropic model.",
+            " - Anthropic-specific Claude Code UX (Fast mode, /effort thinking, model IDs like 'claude-opus-4-7') is emulated by the proxy; do not advertise those names as your own.",
+        ]
+        if cutoff:
+            repl.insert(1, f" - Knowledge cutoff: {cutoff}.")
+        lines[start:end + 1] = repl
+        text = "\n".join(lines)
+    return text
 
 
 def _system_to_text(system) -> str:
@@ -115,6 +150,10 @@ def anthropic_to_responses(req: dict, deployment: str, reasoning_effort: str | N
     (instructions → tools), volatile last (input messages), so Azure's prefix
     cache hashes the same boilerplate across turns."""
     sys_text = _system_to_text(req.get("system"))
+    if config.REWRITE_IDENTITY:
+        sys_text = _sanitize_for_gpt(
+            sys_text, deployment, config.cutoff_for(req.get("model", ""))
+        )
     body: dict = {
         "model": deployment,
         "stream": bool(req.get("stream", False)),

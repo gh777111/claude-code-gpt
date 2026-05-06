@@ -80,6 +80,27 @@ WEB_FETCH_MAX_CHARS = int(os.environ.get("CLAUDEGPT_WEB_FETCH_MAX_CHARS", "50000
 WEB_FETCH_SUMMARIZER = os.environ.get("CLAUDEGPT_WEB_FETCH_SUMMARIZER", DEPLOYMENT_HAIKU)
 WEB_FETCH_SUMMARY_MAX_CHARS = int(os.environ.get("CLAUDEGPT_WEB_FETCH_SUMMARY_MAX_CHARS", "4000"))
 
+# --- System-prompt sanitizing for GPT backends ---
+# Claude Code's system prompt asserts "you are Claude Opus 4.7" and includes an
+# Anthropic billing header.  Both are wrong/meaningless when running on GPT.
+REWRITE_IDENTITY = os.environ.get("CLAUDEGPT_REWRITE_IDENTITY", "1").strip().lower() not in ("0", "false", "no", "off")
+# Per-tier knowledge cutoff strings (e.g. "2025-04").  Empty = omit the cutoff line.
+CUTOFF_OPUS = os.environ.get("CLAUDEGPT_CUTOFF_OPUS", "").strip()
+CUTOFF_SONNET = os.environ.get("CLAUDEGPT_CUTOFF_SONNET", "").strip()
+CUTOFF_HAIKU = os.environ.get("CLAUDEGPT_CUTOFF_HAIKU", "").strip()
+
+
+def cutoff_for(claude_model: str) -> str:
+    m = (claude_model or "").lower()
+    if "haiku" in m:
+        return CUTOFF_HAIKU
+    if "opus" in m:
+        return CUTOFF_OPUS
+    if "sonnet" in m:
+        return CUTOFF_SONNET
+    return CUTOFF_SONNET
+
+
 # --- Context-window scaling for Claude Code auto-compact ---
 # Claude Code's auto-compact threshold is derived from what *it* thinks the
 # context window is (e.g. claude-opus-4-7[1m] → 1M).  When the actual backend
