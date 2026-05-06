@@ -211,6 +211,7 @@ def responses_to_anthropic(resp: dict, model: str) -> dict:
 
     has_tool = any(b.get("type") == "tool_use" for b in blocks)
     usage = resp.get("usage") or {}
+    scale = config.token_scale(model)
     return {
         "id": resp.get("id") or f"msg_{uuid.uuid4().hex[:24]}",
         "type": "message",
@@ -220,7 +221,7 @@ def responses_to_anthropic(resp: dict, model: str) -> dict:
         "stop_reason": _stop_reason(resp, has_tool),
         "stop_sequence": None,
         "usage": {
-            "input_tokens": usage.get("input_tokens", 0),
+            "input_tokens": int(usage.get("input_tokens", 0) * scale),
             "output_tokens": usage.get("output_tokens", 0),
         },
     }

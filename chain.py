@@ -263,6 +263,9 @@ async def _drive_round(
                     resp = evt.get("response") or {}
                     usage = resp.get("usage") or {}
                     cursor["output_tokens"] += usage.get("output_tokens", 0)
+                    # The last round's input_tokens reflects the largest accumulated
+                    # context (prior input + appended function_call_output blocks).
+                    cursor["input_tokens"] = usage.get("input_tokens", cursor["input_tokens"])
                     if saw_real_tool_use:
                         cursor["stop_reason"] = "tool_use"
                     else:
@@ -272,6 +275,7 @@ async def _drive_round(
                     resp = evt.get("response") or {}
                     usage = resp.get("usage") or {}
                     cursor["output_tokens"] += usage.get("output_tokens", 0)
+                    cursor["input_tokens"] = usage.get("input_tokens", cursor["input_tokens"])
                     incomplete = resp.get("incomplete_details") or {}
                     if incomplete.get("reason") == "max_output_tokens":
                         cursor["stop_reason"] = "max_tokens"
@@ -310,6 +314,7 @@ async def stream_with_webfetch(
         "anth_idx": 0,
         "stop_reason": "end_turn",
         "output_tokens": 0,
+        "input_tokens": 0,
         "fatal": False,
     }
 
@@ -416,10 +421,12 @@ async def stream_with_webfetch(
             })
         current_body = {**current_body, "input": new_input}
 
+    scaled_input = int(cursor["input_tokens"] * config.token_scale(requested_model))
     yield _sse("message_delta", {
         "type": "message_delta",
         "delta": {"stop_reason": cursor["stop_reason"], "stop_sequence": None},
-        "usage": {"output_tokens": cursor["output_tokens"]},
+        "usage": {"input_tokens": scaled_input,
+                  "output_tokens": cursor["output_tokens"]},
     })
     yield _sse("message_stop", {"type": "message_stop"})
 

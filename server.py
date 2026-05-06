@@ -200,7 +200,10 @@ async def count_tokens(req: Request):
             for b in c:
                 if b.get("type") == "text":
                     chars += len(b.get("text", ""))
-    return {"input_tokens": max(1, chars // 4)}
+    base = max(1, chars // 4)
+    # Scale up so Claude Code's auto-compact fires before the smaller backend overflows
+    scaled = max(1, int(base * config.token_scale(body.get("model", ""))))
+    return {"input_tokens": scaled}
 
 
 @app.post("/v1/messages")

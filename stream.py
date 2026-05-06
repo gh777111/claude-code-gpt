@@ -2,6 +2,8 @@ import json
 import uuid
 from typing import AsyncIterator
 
+import config
+
 
 def _sse(event: str, data: dict) -> bytes:
     payload = json.dumps(data, ensure_ascii=False)
@@ -34,6 +36,7 @@ async def responses_stream_to_anthropic(
     next_anth_idx = 0
     has_tool_use = False
     output_tokens = 0
+    input_tokens = 0
     stop_reason = "end_turn"
 
     async for evt in events:
@@ -127,6 +130,7 @@ async def responses_stream_to_anthropic(
             resp = evt.get("response") or {}
             usage = resp.get("usage") or {}
             output_tokens = usage.get("output_tokens", output_tokens)
+            input_tokens = usage.get("input_tokens", input_tokens)
             incomplete = resp.get("incomplete_details") or {}
             if has_tool_use:
                 stop_reason = "tool_use"
@@ -139,6 +143,7 @@ async def responses_stream_to_anthropic(
             resp = evt.get("response") or {}
             usage = resp.get("usage") or {}
             output_tokens = usage.get("output_tokens", output_tokens)
+            input_tokens = usage.get("input_tokens", input_tokens)
             incomplete = resp.get("incomplete_details") or {}
             if incomplete.get("reason") == "max_output_tokens":
                 stop_reason = "max_tokens"
@@ -151,9 +156,10 @@ async def responses_stream_to_anthropic(
                                  "message": err.get("message", "responses.failed")}}
             yield f"event: error\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
 
+    scaled_input = int(input_tokens * config.token_scale(model))
     yield _sse("message_delta", {
         "type": "message_delta",
         "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-        "usage": {"output_tokens": output_tokens},
+        "usage": {"input_tokens": scaled_input, "output_tokens": output_tokens},
     })
     yield _sse("message_stop", {"type": "message_stop"})

@@ -80,6 +80,18 @@ WEB_FETCH_MAX_CHARS = int(os.environ.get("CLAUDEGPT_WEB_FETCH_MAX_CHARS", "50000
 WEB_FETCH_SUMMARIZER = os.environ.get("CLAUDEGPT_WEB_FETCH_SUMMARIZER", DEPLOYMENT_HAIKU)
 WEB_FETCH_SUMMARY_MAX_CHARS = int(os.environ.get("CLAUDEGPT_WEB_FETCH_SUMMARY_MAX_CHARS", "4000"))
 
+# --- Context-window scaling for Claude Code auto-compact ---
+# Claude Code's auto-compact threshold is derived from what *it* thinks the
+# context window is (e.g. claude-opus-4-7[1m] → 1M).  When the actual backend
+# is smaller (e.g. gpt-5.4-mini = 400K), Claude Code triggers compact too late.
+# Scale reported `input_tokens` by CLIENT_CONTEXT / BACKEND_CONTEXT so Claude
+# Code's "we hit 80%" fires when the backend is actually at 80% of its smaller
+# window.
+CLIENT_CONTEXT_TOKENS = int(os.environ.get("CLAUDEGPT_CLIENT_CONTEXT", "1000000"))
+BACKEND_CONTEXT_OPUS = int(os.environ.get("CLAUDEGPT_BACKEND_CONTEXT_OPUS", "1000000"))
+BACKEND_CONTEXT_SONNET = int(os.environ.get("CLAUDEGPT_BACKEND_CONTEXT_SONNET", "400000"))
+BACKEND_CONTEXT_HAIKU = int(os.environ.get("CLAUDEGPT_BACKEND_CONTEXT_HAIKU", "400000"))
+
 
 def map_model(claude_model: str) -> str:
     m = (claude_model or "").lower()
@@ -114,6 +126,24 @@ def map_reasoning_effort(claude_model: str) -> str:
     if "sonnet" in m:
         return REASONING_SONNET
     return REASONING_SONNET
+
+
+def token_scale(claude_model: str) -> float:
+    """Multiplier for input_tokens reported back to Claude Code, so its
+    auto-compact threshold (based on CLIENT_CONTEXT_TOKENS) fires before the
+    backend's smaller window overflows."""
+    m = (claude_model or "").lower()
+    if "haiku" in m:
+        backend = BACKEND_CONTEXT_HAIKU
+    elif "opus" in m:
+        backend = BACKEND_CONTEXT_OPUS
+    elif "sonnet" in m:
+        backend = BACKEND_CONTEXT_SONNET
+    else:
+        backend = BACKEND_CONTEXT_SONNET
+    if backend <= 0:
+        return 1.0
+    return CLIENT_CONTEXT_TOKENS / backend
 
 
 def effort_from_thinking(thinking: dict | None) -> str | None:
