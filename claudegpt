@@ -133,6 +133,14 @@ export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-claude-
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-claude-haiku-4-5}"
 unset ANTHROPIC_MODEL || true
 
+# Default starting tier — claudegpt routes opus→gpt-5.5 (1M, expensive),
+# sonnet→gpt-5.4-mini (400K, cheaper).  Default to sonnet to start light.
+DEFAULT_TIER="${CLAUDEGPT_DEFAULT_MODEL:-sonnet}"
+case "$DEFAULT_TIER" in
+  opus|sonnet|haiku) ;;
+  *) DEFAULT_TIER="sonnet" ;;
+esac
+
 # 비용/지연 최소화 — 부수적인 모델 호출(대화 요약, autocompact 결정 등) 끔
 export DISABLE_NON_ESSENTIAL_MODEL_CALLS="${DISABLE_NON_ESSENTIAL_MODEL_CALLS:-1}"
 export DISABLE_AUTOCOMPACT="${DISABLE_AUTOCOMPACT:-1}"
@@ -145,27 +153,30 @@ CLAUDEGPT_GLOBAL_ISOLATE="${CLAUDEGPT_GLOBAL_ISOLATE:-1}"
 if [[ "$CLAUDEGPT_GLOBAL_ISOLATE" == "1" ]]; then
   CLEAN_CONFIG="${CLAUDEGPT_CLEAN_CONFIG_DIR:-/tmp/claudegpt-clean-config}"
   mkdir -p "$CLEAN_CONFIG"
-  if [[ ! -f "$CLEAN_CONFIG/settings.json" ]]; then
-    cat > "$CLEAN_CONFIG/settings.json" <<'JSON'
-{
-  "permissions": {
-    "allow": [
-      "Bash",
-      "Read",
-      "Write",
-      "Edit",
-      "Glob",
-      "Grep",
-      "Task",
-      "TodoWrite",
-      "WebFetch",
-      "NotebookEdit"
-    ]
-  }
-}
-JSON
-  fi
+  # Patch settings.json: ensure model = $DEFAULT_TIER and a base permission allowlist.
+  # Idempotent — preserves any user customizations to the file.
+  CLEAN_CONFIG="$CLEAN_CONFIG" DEFAULT_TIER="$DEFAULT_TIER" python3 - <<'PY'
+import json, os, pathlib
+p = pathlib.Path(os.environ["CLEAN_CONFIG"]) / "settings.json"
+try:
+    d = json.loads(p.read_text())
+except Exception:
+    d = {}
+d["model"] = os.environ["DEFAULT_TIER"]
+d.setdefault("permissions", {"allow": [
+    "Bash", "Read", "Write", "Edit", "Glob", "Grep",
+    "Task", "TodoWrite", "WebFetch", "NotebookEdit",
+]})
+p.write_text(json.dumps(d, indent=2))
+PY
   export CLAUDE_CONFIG_DIR="$CLEAN_CONFIG"
+else
+  # Non-isolated: lock model via env var instead.
+  case "$DEFAULT_TIER" in
+    opus)   export ANTHROPIC_MODEL="$ANTHROPIC_DEFAULT_OPUS_MODEL" ;;
+    sonnet) export ANTHROPIC_MODEL="$ANTHROPIC_DEFAULT_SONNET_MODEL" ;;
+    haiku)  export ANTHROPIC_MODEL="$ANTHROPIC_DEFAULT_HAIKU_MODEL" ;;
+  esac
 fi
 
 exec claude "$@"
